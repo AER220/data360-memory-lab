@@ -1,0 +1,66 @@
+"""Data360-Memory: Overview page. Run with:  streamlit run app.py"""
+import streamlit as st
+
+from data360 import datasets
+from data360.ui import DISCLAIMER, manager, sidebar
+
+st.set_page_config(page_title="Overview", page_icon="🧠", layout="wide")
+mm = manager()
+sidebar(mm)
+
+st.title("Data360-Memory")
+st.subheader("Long-term memory for an R data science study companion, with a hands-on student lab")
+st.info(DISCLAIMER)
+
+st.markdown("""
+A normal chatbot forgets a learner when the session ends, so students repeat their setup, their errors and
+their preferences every time. **Data360-Memory** keeps approved facts **outside the model**, in a persistent
+store, and reads them back in later sessions, even after the program restarts.
+
+It keeps three kinds of memory per learner:
+
+| Type | Example | Behaviour |
+|---|---|---|
+| **Episodic** | `Got Error: could not find function "%>%"` | past events; can be consolidated or forgotten |
+| **Semantic** | `I switched to Posit Cloud` | current facts and preferences; a correction supersedes the old fact |
+| **Procedural** | `Checking loaded packages before debugging the pipe helped` | tutoring moves that worked |
+""")
+
+st.markdown("### The memory loop")
+st.graphviz_chart("""
+digraph G {
+  rankdir=TB; nodesep=0.5; node [shape=box, style="rounded,filled", fillcolor="#E7EEF6", fontname="Helvetica", fontsize=13];
+  Q [label="Learner question"]; F [label="Filter: this learner,\\ncurrent records only"];
+  S [label="Score: relevance +\\nrecency + importance"]; P [label="Prompt: profile + top 3\\nmemories + reference docs\\n(labelled as data)"];
+  A [label="Reply\\n(offline template or LLM)"]; W [label="Propose memory\\nlearner approves"];
+  DB [label="Persistent store\\n(SQLite + vectors)", shape=cylinder, fillcolor="#F6E7D8"];
+  R [label="Reference knowledge\\nreal R docs + Stack Overflow", shape=cylinder, fillcolor="#E3F1E3"];
+  M [label="Maintenance: update,\\nconsolidate, forget, delete", fillcolor="#FCEBD5"];
+  {rank=same; Q; F; S;} {rank=same; P; R;} {rank=same; A; W; DB; M;}
+  Q -> F -> S -> P -> A -> W -> DB; DB -> F [style=dashed, label=" read"]; R -> P; M -> DB;
+}
+""", width="content")
+
+st.markdown("### What is in this project")
+m = datasets.manifest()
+ev_c, ev_g = datasets.canonical_events(), datasets.generated_events()
+c = st.columns(5)
+c[0].metric("Real doc chunks", len(datasets.reference_docs()), help="tidyverse, base R, jsonlite, palmerpenguins pages")
+c[1].metric("Real Stack Overflow questions", len(datasets.stackoverflow_questions()))
+c[2].metric("Penguins rows (real, CC0)", len(datasets.penguins()))
+c[3].metric("Course-set events", len(ev_c), help="3 fictional learners, written by hand")
+c[4].metric("Generated events", len(ev_g), help=f"{len({e['learner_id'] for e in ev_g})} seeded synthetic learners")
+if m:
+    st.caption(f"Real data fetched {m.get('fetched_utc', '?')} (UTC) and cached in data/real/. See DATA_SOURCES.md.")
+
+st.markdown("""
+### How to use the pages
+1. **Data Explorer**: browse the real reference data and the synthetic learner histories; generate new learners with a seed.
+2. **Chat and Memory**: talk to Data360 as a learner, approve memories, and inspect the exact prompt.
+3. **Memory Timeline**: see facts being written, superseded, consolidated and forgotten over the semester.
+4. **Evaluation**: compare no memory, naive memory and the Data360 policy, and run the PASS/FAIL policy checks.
+5. **Lab**: the 40 minute student lab, with checkpoints you can run from the page.
+
+Start by clicking **Load course set (3 learners)** in the sidebar.
+""")
+st.caption("Use Data360 only where the instructor and the assignment allow AI help. Never for prohibited assessments.")

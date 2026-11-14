@@ -1,0 +1,37 @@
+{
+  "fetched_utc": "2026-11-14T08:15:51+00:00",
+  "reference_docs": {
+    "chunks": 216,
+    "pages": 22
+  },
+  "stackoverflow_r_errors": {
+    "questions": 66
+  },
+  "penguins_rows": 344,
+  "sources": [
+    "https://dplyr.tidyverse.org/reference/filter.html",
+    "https://dplyr.tidyverse.org/reference/mutate.html",
+    "https://dplyr.tidyverse.org/reference/select.html",
+    "https://dplyr.tidyverse.org/reference/arrange.html",
+    "https://dplyr.tidyverse.org/reference/summarise.html",
+    "https://dplyr.tidyverse.org/reference/group_by.html",
+    "https://dplyr.tidyverse.org/reference/mutate-joins.html",
+    "https://magrittr.tidyverse.org/reference/pipe.html",
+    "https://ggplot2.tidyverse.org/reference/ggplot.html",
+    "https://ggplot2.tidyverse.org/reference/aes.html",
+    "https://ggplot2.tidyverse.org/reference/geom_point.html",
+    "https://ggplot2.tidyverse.org/reference/geom_histogram.html",
+    "https://ggplot2.tidyverse.org/reference/facet_wrap.html",
+    "https://tidyr.tidyverse.org/reference/pivot_longer.html",
+    "https://tidyr.tidyverse.org/reference/drop_na.html",
+    "https://readr.tidyverse.org/reference/read_delim.html",
+    "https://stat.ethz.ch/R-manual/R-devel/library/stats/html/lm.html",
+    "https://stat.ethz.ch/R-manual/R-devel/library/base/html/library.html",
+    "https://stat.ethz.ch/R-manual/R-devel/library/base/html/factor.html",
+    "https://stat.ethz.ch/R-manual/R-devel/library/base/html/NA.html",
+    "https://cran.r-project.org/web/packages/jsonlite/vignettes/json-aaquickstart.html",
+    "https://allisonhorst.github.io/palmerpenguins/",
+    "https://api.stackexchange.com/2.3/search/advanced",
+    "https://raw.githubusercontent.com/allisonhorst/palmerpenguins/main/inst/extdata/penguins.csv"
+  ]
+}
