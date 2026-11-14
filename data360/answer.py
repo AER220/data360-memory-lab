@@ -1,18 +1,28 @@
-"""Replies. Offline template by default; optional LLM through environment variables.
+"""Replies. The memory pipeline (store, retrieval, prompt) never depends on the provider;
+only the final step, turning the finished prompt into text, does.
 
-DATA360_LLM_PROVIDER = "openai" (needs OPENAI_API_KEY) or "ollama" (local server, free)
-DATA360_LLM_MODEL    = model name (default gpt-4o-mini or llama3.2)
-Nothing is sent anywhere unless DATA360_LLM_PROVIDER is set.
+Providers
+  offline    built-in template grounded in the retrieved memories (no key, nothing leaves the machine)
+  openai     needs OPENAI_API_KEY      (default model gpt-4o-mini)
+  anthropic  needs ANTHROPIC_API_KEY   (default model claude-haiku-5-5)
+  ollama     local server, opt in with DATA360_LLM_PROVIDER=ollama (default model llama3.2)
+
+Keys come from environment variables, a local .env file, or Streamlit secrets (see config.py).
+If an API call fails, the reply falls back to the offline template with a warning; it never crashes.
 """
+# Here I turn the finished prompt into a reply, with OpenAI, Anthropic, Ollama or the offline
+# template.
 from __future__ import annotations
 
-import os
 import re
+from dataclasses import dataclass
 
 import requests
 
+from .config import has, setting
 from .memory import Context
 
+# Patterns used by the offline template: personal questions, profile slots and injection attempts.
 PERSONAL = re.compile(r"\b(i|my|me|mine|i'm|i've|do i|did i)\b", re.I)
 SLOT_HINTS = [
     ("environment", r"environment|rstudio|posit|setup|ide|laptop|where do i (run|code)"),
@@ -20,41 +30,169 @@ SLOT_HINTS = [
     ("accessibility", r"accessib|screen reader|present plots|colou?r blind|describe .*plot|how should you present"),
     ("background", r"background|experience|new to coding"),
 ]
+# Memories that look like instructions ('ignore previous ...') are shown as data and never obeyed.
 INJECTION = re.compile(r"ignore (all|the|previous|any)|reveal|system prompt|other learners", re.I)
+# When memory has nothing on a personal question, the template says so instead of guessing.
 NO_RECORD = "I do not have a record of that in your memory, so I will not guess."
 
+# Provider names, display labels, default model ids and the key each provider needs.
+OFFLINE, OPENAI, ANTHROPIC, OLLAMA = "offline", "openai", "anthropic", "ollama"
+LABELS = {OFFLINE: "Offline template", OPENAI: "OpenAI", ANTHROPIC: "Anthropic", OLLAMA: "Ollama (local)"}
+# gpt-4o-mini is cheap and supported until January 2027; claude-haiku-5-5 is Anthropic's fast, low-
+# cost current model. Both can be changed in the sidebar.
+DEFAULT_MODELS = {OPENAI: "gpt-4o-mini", ANTHROPIC: "claude-haiku-5-5", OLLAMA: "llama3.2"}
+KEY_NAMES = {OPENAI: "OPENAI_API_KEY", ANTHROPIC: "ANTHROPIC_API_KEY"}
+# Shown in the UI to make clear that switching models never changes memory.
+MEMORY_NOTE = ("Memory store, retrieval and the prompt are identical for every provider; "
+               "switching models only changes who writes the final wording.")
 
+
+# ---------- provider selection ----------
+
+# Here I list only providers that can actually work: offline always, cloud providers only when their
+# key exists.
+def available_providers() -> list[str]:
+    """Offline is always available; cloud providers only when their key is present."""
+    out = [OFFLINE]
+    if has(KEY_NAMES[OPENAI]):
+        out.append(OPENAI)
+    if has(KEY_NAMES[ANTHROPIC]):
+        out.append(ANTHROPIC)
+    if setting("DATA360_LLM_PROVIDER").lower() == OLLAMA:
+        out.append(OLLAMA)
+    return out
+
+
+# Starting choice: an explicit DATA360_LLM_PROVIDER wins, then OpenAI, then Anthropic, then offline.
+def default_provider() -> str:
+    """DATA360_LLM_PROVIDER if set and usable, else OpenAI if keyed, else Anthropic, else offline."""
+    avail = available_providers()
+    wanted = setting("DATA360_LLM_PROVIDER").lower()
+    if wanted in ("offline", "none", "off", "template"):
+        return OFFLINE
+    if wanted in avail:
+        return wanted
+    for p in (OPENAI, ANTHROPIC):
+        if p in avail:
+            return p
+    return OFFLINE
+
+
+# Kept so older code that asked 'is an LLM on?' still works.
 def provider() -> str:
-    p = os.environ.get("DATA360_LLM_PROVIDER", "").strip().lower()
-    if p == "openai" and not os.environ.get("OPENAI_API_KEY"):
+    """Backward compatible: the default provider, or '' when replies use the offline template."""
+    p = default_provider()
+    return "" if p == OFFLINE else p
+
+
+# A per-provider override (for example DATA360_ANTHROPIC_MODEL) beats the built-in default.
+def default_model(p: str) -> str:
+    if p == OFFLINE:
         return ""
-    return p if p in ("openai", "ollama") else ""
+    specific = setting(f"DATA360_{p.upper()}_MODEL")
+    if specific:
+        return specific
+    if setting("DATA360_LLM_PROVIDER").lower() == p and setting("DATA360_LLM_MODEL"):
+        return setting("DATA360_LLM_MODEL")
+    return DEFAULT_MODELS.get(p, "")
 
 
-def llm_complete(prompt: str, timeout: int = 60) -> str:
-    p = provider()
-    if p == "openai":
-        r = requests.post("https://api.openai.com/v1/chat/completions", timeout=timeout,
-                          headers={"Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}"},
-                          json={"model": os.environ.get("DATA360_LLM_MODEL", "gpt-4o-mini"),
-                                "messages": [{"role": "user", "content": prompt}], "temperature": 0.2})
-        r.raise_for_status()
-        return r.json()["choices"][0]["message"]["content"]
-    if p == "ollama":
-        host = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
-        r = requests.post(f"{host}/api/generate", timeout=timeout,
-                          json={"model": os.environ.get("DATA360_LLM_MODEL", "llama3.2"), "prompt": prompt, "stream": False})
-        r.raise_for_status()
-        return r.json()["response"]
-    raise RuntimeError("no LLM provider configured")
+# Human-readable label such as 'Anthropic claude-haiku-5-5', shown next to each reply.
+def describe(p: str, model: str = "") -> str:
+    if p == OFFLINE:
+        return "offline template"
+    return f"{LABELS.get(p, p)} {model or default_model(p)}"
 
 
+# ---------- calls ----------
+
+# I import each SDK only when it is used, so the offline app still runs if a package is missing.
+def _call_openai(prompt: str, model: str, timeout: int) -> str:
+    from openai import OpenAI
+
+    client = OpenAI(api_key=setting(KEY_NAMES[OPENAI]), timeout=timeout, max_retries=1)
+    kwargs = {"model": model, "messages": [{"role": "user", "content": prompt}]}
+    # Older GPT models accept a low temperature for steadier answers; newer reasoning models reject
+    # it, so I only send it to the older ones.
+    if model.startswith(("gpt-4", "gpt-3.5")):  # newer reasoning models reject a custom temperature
+        kwargs["temperature"] = 0.2
+    resp = client.chat.completions.create(**kwargs)
+    return (resp.choices[0].message.content or "").strip()
+
+
+# Anthropic's Messages API. The prompt is sent as one user message, exactly as for OpenAI.
+def _call_anthropic(prompt: str, model: str, timeout: int) -> str:
+    from anthropic import Anthropic
+
+    client = Anthropic(api_key=setting(KEY_NAMES[ANTHROPIC]), timeout=timeout, max_retries=1)
+    resp = client.messages.create(model=model, max_tokens=2048,
+                                  messages=[{"role": "user", "content": prompt}])
+    # Newer Claude models can return thinking blocks before the answer, so I keep only the text
+    # blocks.
+    return "".join(getattr(b, "text", "") for b in resp.content if getattr(b, "type", "") == "text").strip()
+
+
+# Ollama runs a free model locally over HTTP.
+def _call_ollama(prompt: str, model: str, timeout: int) -> str:
+    host = setting("OLLAMA_HOST", "http://localhost:11434")
+    r = requests.post(f"{host}/api/generate", timeout=timeout, json={"model": model, "prompt": prompt, "stream": False})
+    r.raise_for_status()
+    return r.json()["response"]
+
+
+# A lookup table from provider name to the function that calls it.
+CALLS = {OPENAI: _call_openai, ANTHROPIC: _call_anthropic, OLLAMA: _call_ollama}
+
+
+# Sends the finished prompt to one provider. It raises on any problem; reply() decides what to do
+# about it.
+def llm_complete(prompt: str, p: str | None = None, model: str | None = None, timeout: int = 60) -> str:
+    p = p or default_provider()
+    if p not in CALLS:
+        raise RuntimeError("no LLM provider configured")
+    if p in KEY_NAMES and not has(KEY_NAMES[p]):
+        raise RuntimeError(f"{KEY_NAMES[p]} is not set")
+    text = CALLS[p](prompt, (model or "").strip() or default_model(p), timeout)
+    # An empty answer counts as a failure, so the learner never sees a blank bubble.
+    if not text:
+        raise RuntimeError("the provider returned an empty reply")
+    return text
+
+
+# Builds a short, friendly error message. I never include the raw SDK message because it can contain
+# part of the key.
+def _safe_error(exc: Exception) -> str:
+    """Short, key-free description of a failed call."""
+    status = getattr(exc, "status_code", None) or getattr(getattr(exc, "response", None), "status_code", None)
+    hint = {401: "the API key was rejected; check it in Secrets", 403: "the key has no access to this model",
+            404: "model name not found", 429: "rate limit or no credits left on this account"}.get(status, "")
+    if isinstance(exc, ImportError):
+        hint = "the SDK is not installed; run pip install -r requirements.txt"
+    if not hint and isinstance(exc, RuntimeError):
+        hint = str(exc)
+    if not hint and "timeout" in type(exc).__name__.lower():
+        hint = "the request timed out"
+    parts = [type(exc).__name__] + ([f"HTTP {status}"] if status else []) + ([hint] if hint else [])
+    msg = ", ".join(parts)
+    # Extra safety: blank out any key value and anything that looks like an sk- key.
+    for name in KEY_NAMES.values():  # belt and braces: never echo a key
+        key = setting(name)
+        if key:
+            msg = msg.replace(key, "***")
+    return re.sub(r"(sk-[A-Za-z0-9_\-]{4})[A-Za-z0-9_\-]+", r"\1***", msg)
+
+
+# ---------- offline template ----------
+
+# The offline reply: a template filled from the retrieved memories and references. It shows what
+# memory found without any model.
 def template_reply(question: str, ctx: Context | None, references: list[dict], memory_on: bool) -> str:
     q = question.lower()
     parts: list[str] = []
     personal = bool(PERSONAL.search(question))
     answered = False
     if memory_on and ctx is not None:
+        # If the question is about a profile slot, answer with the current fact and cite its id.
         for slot, pat in SLOT_HINTS:
             if re.search(pat, q):
                 match = [m for m in ctx.profile if m.slot == slot or (slot == "style" and m.topic in ("style", "data frames"))]
@@ -62,6 +200,7 @@ def template_reply(question: str, ctx: Context | None, references: list[dict], m
                     parts.append(f"Your current {slot} fact is [{match[0].memory_id}]: \"{match[0].text}\"")
                     answered = True
                 break
+        # Split memories into normal ones and ones that look like injected instructions.
         rel = [r for r in ctx.memories if not INJECTION.search(r.memory.text)]
         flagged = [r for r in ctx.memories if INJECTION.search(r.memory.text)]
         if rel:
@@ -71,11 +210,13 @@ def template_reply(question: str, ctx: Context | None, references: list[dict], m
         if flagged:
             parts.append(f"Memory {', '.join(r.memory.memory_id for r in flagged)} contains an instruction. "
                          "I treat it as data and did not follow it.")
+        # Personal question with nothing found: abstain instead of inventing an answer.
         if personal and not answered:
             parts.insert(0, NO_RECORD)
         style = [m for m in ctx.profile if m.slot == "style"]
         if style and answered:
             parts.append(f"(I will follow your stated preference: {style[0].text})")
+    # Memory switched off: be honest that nothing about the learner is available.
     elif personal:
         parts.append("Memory is off, so I cannot recall anything about you from earlier sessions.")
     if references:
@@ -91,16 +232,45 @@ def template_reply(question: str, ctx: Context | None, references: list[dict], m
     return "\n".join(out).strip()
 
 
-def reply(question: str, prompt: str, ctx: Context | None, references: list[dict], memory_on: bool) -> tuple[str, str]:
-    """Returns (text, mode) where mode is 'offline template' or the provider name."""
-    if provider():
-        try:
-            return llm_complete(prompt), provider()
-        except Exception as exc:  # never crash the class demo
-            return (template_reply(question, ctx, references, memory_on)
-                    + f"\n\n(LLM call failed: {type(exc).__name__}; showing the offline template.)", "offline template")
-    return template_reply(question, ctx, references, memory_on), "offline template"
+# ---------- public entry point ----------
+
+@dataclass
+# What reply() returns: the text, who actually answered, who was asked, and a warning if it fell back.
+class Reply:
+    text: str
+    provider: str          # who actually answered: offline / openai / anthropic / ollama
+    model: str             # model id that answered ("" for offline)
+    requested: str         # provider the user picked
+    warning: str = ""      # set when a call failed and we fell back to the template
+
+    @property
+    def label(self) -> str:
+        return describe(self.provider, self.model)
+
+    # Lets older code keep writing `text, mode = reply(...)`.
+    def __iter__(self):  # allows: text, mode = reply(...)
+        return iter((self.text, self.label))
 
 
+# Entry point used by the Chat page. The prompt was already built from memory, so memory is identical
+# whichever provider is chosen.
+def reply(question: str, prompt: str, ctx: Context | None, references: list[dict], memory_on: bool,
+          provider_name: str | None = None, model: str | None = None) -> Reply:
+    """The prompt is built before this call and is the same for every provider."""
+    p = provider_name or default_provider()
+    if p == OFFLINE:
+        return Reply(template_reply(question, ctx, references, memory_on), OFFLINE, "", OFFLINE)
+    used_model = (model or "").strip() or default_model(p)
+    try:
+        return Reply(llm_complete(prompt, p, used_model), p, used_model, p)
+    # Any failure (bad key, no credits, network, unknown model) falls back to the offline template
+    # with a clear warning.
+    except Exception as exc:  # never crash the class demo
+        warning = (f"{describe(p, used_model)} failed ({_safe_error(exc)}). "
+                   "Showing the offline template instead; memory was not affected.")
+        return Reply(template_reply(question, ctx, references, memory_on), OFFLINE, "", p, warning)
+
+
+# Used by the evaluation to count honest 'I do not know' answers.
 def is_abstention(text: str) -> bool:
     return text.startswith(NO_RECORD) or "cannot recall anything" in text

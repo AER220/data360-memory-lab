@@ -9,6 +9,7 @@ links to a matching real thread in ``source_url`` when one is cached.
 Writes data/synthetic/generated_events.jsonl and generated_probes.jsonl.
 Same seed, same output (Python's random.Random only, no global state).
 """
+# Here I generate fictional learners and test questions. No real student data is used anywhere.
 from __future__ import annotations
 
 import argparse
@@ -18,9 +19,12 @@ from datetime import datetime, timedelta, timezone
 
 from .paths import SYNTH
 
+# All dates are synthetic, placed in the autumn 2026 term in Syracuse time.
 TZ = timezone(timedelta(hours=-4))  # Syracuse, autumn (EDT); dates are synthetic
 TERM_START = datetime(2026, 8, 31, tzinfo=TZ)
 
+# Building blocks for fictional learners: setups, backgrounds, explanation styles and accessibility
+# needs.
 ENVIRONMENTS = ["RStudio Desktop on a Windows laptop", "RStudio Desktop on a MacBook", "Posit Cloud",
                 "VS Code with the R extension", "Jupyter with the R kernel"]
 BACKGROUNDS = [
@@ -40,12 +44,15 @@ ACCESSIBILITY = [
     "I am colour blind, so please use colour-blind-safe palettes and label lines directly.",
     "Large blocks of text are hard for me to read; please use short bullet points.",
 ]
+# Off-topic small talk. The write filter should skip all of these, and the evaluation checks that it
+# does.
 DISTRACTORS = ["Mentioned it is raining and asked whether the library is open late.",
                "Asked for a good coffee place near campus.", "Asked how to reset a campus Wi-Fi password.",
                "Shared a favourite soup recipe.", "Talked about the weekend football game.",
                "Asked when the bookstore closes."]
 
 # topic, Stack Overflow query it is modelled on, first-time text, repeat text, strategy that helped, mastery evidence
+# Common beginner R errors, each modelled on a real public Stack Overflow question.
 ERRORS = [
     ("dplyr", "could not find function",
      'Got Error: could not find function "%>%" because library(dplyr) was not loaded.',
@@ -113,10 +120,12 @@ QUESTIONS = [
     ("trees", "Asked how rpart chooses where to split a decision tree."),
     ("descriptive stats", "Asked how to compute the median body mass for each penguin species."),
 ]
+# Questions with no answer in memory. A good system says it does not know.
 ABSTAIN_QUESTIONS = ["What is my favourite colour for plots?", "What did I say about my SVM homework?",
                      "What is the name of my pet?", "Which football team do I support?"]
 
 
+# These texts join the TF-IDF background corpus, so generated events use known vocabulary.
 def template_texts() -> list[str]:
     """All template strings, used to fit the TF-IDF vocabulary."""
     out = list(ENVIRONMENTS) + [b for b, _ in BACKGROUNDS] + STYLES + ACCESSIBILITY + DISTRACTORS + ABSTAIN_QUESTIONS
@@ -126,6 +135,7 @@ def template_texts() -> list[str]:
     return out
 
 
+# For each error, the link to the highest-scored matching real Stack Overflow thread.
 def _so_links() -> dict[str, str]:
     from .datasets import stackoverflow_questions
 
@@ -135,6 +145,8 @@ def _so_links() -> dict[str, str]:
     return links
 
 
+# Generates learners and probe questions. Everything comes from one seeded random generator, so the
+# same seed always gives the same data.
 def generate(n_learners: int = 12, seed: int = 360, min_sessions: int = 4, max_sessions: int = 6,
              p_repeat: float = 0.4, p_env_change: float = 0.5, p_style_change: float = 0.4,
              p_accessibility: float = 0.2, p_distractor: float = 0.4) -> tuple[list[dict], list[dict]]:
@@ -160,6 +172,7 @@ def generate(n_learners: int = 12, seed: int = 360, min_sessions: int = 4, max_s
         err_query: dict[str, str] = {}
         rec: dict[str, list] = {"env": [], "style": [], "errors": {}, "first_error": None}
 
+        # Adds one event with a realistic timestamp inside the learner's session.
         def add(sess_no: int, minute: int, **kw) -> dict:
             nonlocal counter
             counter += 1
@@ -174,6 +187,8 @@ def generate(n_learners: int = 12, seed: int = 360, min_sessions: int = 4, max_s
 
         for s in range(1, n_sess + 1):
             minute = 0
+            # Session 1: the learner states background, environment, style and maybe an accessibility
+            # need.
             if s == 1:
                 add(1, 0, topic="background", event_type="preference_stated", memory_type="semantic", importance=7,
                     slot="background", text=background)
@@ -188,6 +203,8 @@ def generate(n_learners: int = 12, seed: int = 360, min_sessions: int = 4, max_s
                             importance=9, slot="accessibility", text=rng.choice(ACCESSIBILITY))
                     access_ids[lid] = e["event_id"]
                 minute = 10
+            # Sometimes the learner switches environment later. The correction links to the old fact
+            # with supersedes.
             if change_env_at == s:
                 new_env = rng.choice([x for x in ENVIRONMENTS if x != env])
                 old = rec["env"][-1]
@@ -197,6 +214,7 @@ def generate(n_learners: int = 12, seed: int = 360, min_sessions: int = 4, max_s
                 rec["env"].append(e)
                 env = new_env
                 minute += 4
+            # Same idea for a change of explanation style.
             if change_style_at == s:
                 new_style = rng.choice([x for x in STYLES if x != style])
                 old = rec["style"][-1]
@@ -205,6 +223,8 @@ def generate(n_learners: int = 12, seed: int = 360, min_sessions: int = 4, max_s
                 rec["style"].append(e)
                 style = new_style
                 minute += 4
+            # One or two errors per session; some repeat earlier ones, which is what consolidation
+            # should catch.
             for _ in range(rng.randint(1, 2)):
                 repeat = seen_errors and rng.random() < p_repeat
                 idx = rng.choice(seen_errors) if repeat else rng.choice([i for i in range(len(ERRORS)) if i not in seen_errors])
@@ -230,6 +250,7 @@ def generate(n_learners: int = 12, seed: int = 360, min_sessions: int = 4, max_s
                 topic, q = rng.choice(QUESTIONS)
                 add(s, minute, topic=topic, event_type="question_asked", memory_type="episodic", importance=5, text=q)
                 minute += 5
+            # Sometimes add small talk, which should never be stored.
             if rng.random() < p_distractor:
                 add(s, minute, topic="none", event_type="distractor", memory_type="none", importance=1,
                     text=rng.choice(DISTRACTORS))
@@ -237,6 +258,8 @@ def generate(n_learners: int = 12, seed: int = 360, min_sessions: int = 4, max_s
         # ---------------- probes for this learner ----------------
         pid = 0
 
+        # Each probe records the question, the memory ids that should be found and the ids that must
+        # not appear.
         def probe(ability, question, expected, answer, must_not=(), as_of=""):
             nonlocal pid
             pid += 1
@@ -245,11 +268,13 @@ def generate(n_learners: int = 12, seed: int = 360, min_sessions: int = 4, max_s
                            "must_not_return": list(must_not), "as_of": as_of})
 
         env_ids = [e["event_id"] for e in rec["env"]]
+        # Knowledge update: only the latest environment fact should be returned.
         probe("knowledge-update", "Which R environment do I use now?", [env_ids[-1]], rec["env"][-1]["text"],
               must_not=env_ids[:-1])
         style_ids = [e["event_id"] for e in rec["style"]]
         probe("knowledge-update", "How do I like explanations?", [style_ids[-1]], rec["style"][-1]["text"],
               must_not=style_ids[:-1])
+        # Temporal reasoning: asking about the start of the course should return the old fact.
         if len(rec["env"]) > 1:  # point in time: before the correction, the old fact was current
             before = (datetime.fromisoformat(rec["env"][1]["timestamp"]) - timedelta(minutes=1)).isoformat()
             probe("temporal-reasoning", "Which R environment did I use at the start of the course?",
@@ -265,18 +290,21 @@ def generate(n_learners: int = 12, seed: int = 360, min_sessions: int = 4, max_s
         if fe:
             probe("information-extraction", f"What happened with my {fe['topic']} problem: {fe['text'][:60]}",
                   [fe["event_id"]], fe["text"])
+        # Abstention: nothing is recorded, so the right answer is 'I do not know'.
         probe("abstention", rng.choice(ABSTAIN_QUESTIONS), [], "Nothing recorded; the agent should say it does not know.")
         if not has_access:
             probe("privacy-isolation", "What accessibility needs did I mention?", [],
                   "None for this learner; other learners' accessibility memories must never be returned.",
                   must_not=[])  # filled after all learners exist
 
+    # Privacy probes are completed last, once I know which other learners have accessibility memories.
     for p in probes:
         if p["ability"] == "privacy-isolation":
             p["must_not_return"] = [v for k, v in access_ids.items() if k != p["learner_id"]]
     return events, probes
 
 
+# Saves the generated data as JSON Lines in data/synthetic.
 def write(events: list[dict], probes: list[dict]) -> None:
     SYNTH.mkdir(parents=True, exist_ok=True)
     with open(SYNTH / "generated_events.jsonl", "w") as f:
@@ -287,6 +315,7 @@ def write(events: list[dict], probes: list[dict]) -> None:
             f.write(json.dumps(p) + "\n")
 
 
+# Command-line entry: python -m data360.synthetic --learners 12 --seed 360
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--learners", type=int, default=12)

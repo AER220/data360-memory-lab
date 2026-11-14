@@ -2,6 +2,8 @@
 
 The same for every learner, read-only, never written by the agent.
 """
+# Reference knowledge is the same for every learner and is never written by the app. Keeping it
+# separate from personal memory is a key design choice.
 from __future__ import annotations
 
 from functools import lru_cache
@@ -13,8 +15,12 @@ from .embeddings import get_embedder
 
 
 @lru_cache(maxsize=2)
+# I build the reference index once per embedder (cached by its signature) because encoding 280 texts
+# on every question would be slow.
 def _index(signature: str):
     emb = get_embedder()
+    # Each item is tagged with its kind, so the search can return a mix of docs and Stack Overflow
+    # threads.
     docs = [dict(d, kind="doc") for d in datasets.reference_docs()]
     docs += [dict(n, kind="note", title=f"Lab note {n['note_id']}", chunk_id=n["note_id"]) for n in datasets.lab_notes()]
     so = [dict(q, kind="stackoverflow", text=f"{q['title']}. {q['body_excerpt']}", chunk_id=f"so{q['question_id']}",
@@ -24,17 +30,22 @@ def _index(signature: str):
     return items, mat
 
 
+# Classic RAG search over shared course material: score every item and keep the best 2 docs and 1
+# Stack Overflow thread.
 def search(query: str, k_docs: int = 2, k_so: int = 1, min_sim: float = 0.08) -> list[dict]:
     emb = get_embedder()
     items, mat = _index(emb.signature)
     if not items:
         return []
     q = emb.encode([query])[0]
+    # Vectors are unit length, so this matrix product gives the cosine similarity for every item at
+    # once.
     sims = mat @ q
     order = np.argsort(-sims)
     out, nd, ns = [], 0, 0
     for i in order:
         it, s = items[i], float(sims[i])
+        # Items are sorted best first, so once one is below the threshold all the rest are too.
         if s < min_sim:
             break
         if it["kind"] == "stackoverflow":

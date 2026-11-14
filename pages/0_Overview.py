@@ -1,15 +1,19 @@
 """Data360-Memory: Overview page. Run with:  streamlit run app.py"""
+# Overview page: what long-term memory is, the loop diagram and what data the project contains.
 import streamlit as st
 
 from data360 import datasets
 from data360.ui import DISCLAIMER, manager, sidebar
 
 st.set_page_config(page_title="Overview", page_icon="🧠", layout="wide")
+# Every page shares one cached memory manager, so all pages see the same store.
 mm = manager()
+# Same sidebar everywhere: dataset buttons, reset and the reply model switch.
 sidebar(mm)
 
 st.title("Data360-Memory")
 st.subheader("Long-term memory for an R data science study companion, with a hands-on student lab")
+# I show the synthetic-data disclaimer up front, because the app must never hold real student records.
 st.info(DISCLAIMER)
 
 st.markdown("""
@@ -26,13 +30,15 @@ It keeps three kinds of memory per learner:
 | **Procedural** | `Checking loaded packages before debugging the pipe helped` | tutoring moves that worked |
 """)
 
+# A diagram of the loop the other pages demonstrate: filter, score, prompt, reply, propose, approve,
+# store.
 st.markdown("### The memory loop")
 st.graphviz_chart("""
 digraph G {
   rankdir=TB; nodesep=0.5; node [shape=box, style="rounded,filled", fillcolor="#E7EEF6", fontname="Helvetica", fontsize=13];
   Q [label="Learner question"]; F [label="Filter: this learner,\\ncurrent records only"];
   S [label="Score: relevance +\\nrecency + importance"]; P [label="Prompt: profile + top 3\\nmemories + reference docs\\n(labelled as data)"];
-  A [label="Reply\\n(offline template or LLM)"]; W [label="Propose memory\\nlearner approves"];
+  A [label="Reply\\n(offline, OpenAI or Anthropic;\\nsame prompt)"]; W [label="Propose memory\\nlearner approves"];
   DB [label="Persistent store\\n(SQLite + vectors)", shape=cylinder, fillcolor="#F6E7D8"];
   R [label="Reference knowledge\\nreal R docs + Stack Overflow", shape=cylinder, fillcolor="#E3F1E3"];
   M [label="Maintenance: update,\\nconsolidate, forget, delete", fillcolor="#FCEBD5"];
@@ -41,6 +47,7 @@ digraph G {
 }
 """, width="content")
 
+# Counts come straight from the data files, so the numbers on screen are always true.
 st.markdown("### What is in this project")
 m = datasets.manifest()
 ev_c, ev_g = datasets.canonical_events(), datasets.generated_events()
@@ -50,6 +57,7 @@ c[1].metric("Real Stack Overflow questions", len(datasets.stackoverflow_question
 c[2].metric("Penguins rows (real, CC0)", len(datasets.penguins()))
 c[3].metric("Course-set events", len(ev_c), help="3 fictional learners, written by hand")
 c[4].metric("Generated events", len(ev_g), help=f"{len({e['learner_id'] for e in ev_g})} seeded synthetic learners")
+# Shows when the real data was fetched, from data/real/manifest.json.
 if m:
     st.caption(f"Real data fetched {m.get('fetched_utc', '?')} (UTC) and cached in data/real/. See DATA_SOURCES.md.")
 

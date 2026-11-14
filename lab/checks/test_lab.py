@@ -3,9 +3,13 @@
 Includes UNSEEN cases (learner syn_L09) that are not in the data file, so a solution
 that hard-codes the course-set ids will not pass.
 """
+# The lab checkpoints. Each test name starts with its exercise, so check.py can group results.
+# A fixed 'now' keeps the checks deterministic.
 NOW = "2026-11-12T12:00:00-05:00"
 PIPE_Q = "Why do I keep getting could not find function %>%?"
 
+# Extra events for a learner that is not in the data file. A solution that hard-codes ids from the
+# course set will fail on these.
 UNSEEN = [
     {"event_id": "u1", "learner_id": "syn_L09", "session_id": "s09_1", "timestamp": "2026-09-08T10:00:00-04:00",
      "memory_type": "semantic", "event_type": "preference_stated", "importance": 6, "supersedes": "",
@@ -21,6 +25,7 @@ UNSEEN = [
      "text": "Correction: I moved from Jupyter notebooks to Posit Cloud in the browser."},
     {"event_id": "u5", "learner_id": "syn_L08", "session_id": "s08_1", "timestamp": "2026-10-28T10:00:00-04:00",
      "memory_type": "semantic", "event_type": "correction", "importance": 8, "supersedes": "u1",
+     # This correction comes from a different learner and must not change syn_L09's fact.
      "text": "Correction: another learner tries to overwrite syn_L09's fact."},
     {"event_id": "u6", "learner_id": "syn_L09", "session_id": "s09_3", "timestamp": "2026-10-27T10:05:00-04:00",
      "memory_type": "episodic", "event_type": "question_asked", "importance": 2, "supersedes": "",
@@ -29,6 +34,7 @@ UNSEEN = [
 
 
 # ---------------------------------------------------------------- Exercise 1
+# Exercise 1: 24 of the 28 course-set events are worth keeping.
 def test_ex1_write_filter_course_set(lab):
     kept = [e for e in lab.load_events() if lab.should_store(e)]
     assert len(kept) == 24, f"expected 24 kept events, got {len(kept)}"
@@ -40,6 +46,7 @@ def test_ex1_write_filter_unseen(lab):
 
 
 # ---------------------------------------------------------------- Exercise 2
+# Exercise 2: every record has a vector and survives reopening the store.
 def test_ex2_write_and_persist(lab, full_store, tmp_path):
     assert len(full_store.records) == 24
     assert set(full_store.vectors) == set(full_store.records), "every record needs a vector"
@@ -47,6 +54,7 @@ def test_ex2_write_and_persist(lab, full_store, tmp_path):
     assert len(reopened.records) == 24, "records must survive a restart (call store.save())"
 
 
+# A correction closes the old fact but keeps it as history.
 def test_ex2_correction_keeps_history(full_store):
     old = full_store.records["e003"]
     assert old["superseded_by"] == "e009"
@@ -54,6 +62,7 @@ def test_ex2_correction_keeps_history(full_store):
     assert "e003" in full_store.records, "do not delete the old fact: it is history"
 
 
+# Only the same learner can supersede their own fact.
 def test_ex2_unseen_correction_same_learner_only(lab, store):
     for e in UNSEEN:
         lab.write_memory(store, e)
@@ -62,6 +71,7 @@ def test_ex2_unseen_correction_same_learner_only(lab, store):
 
 
 # ---------------------------------------------------------------- Exercise 3
+# Exercise 3: the answer depends on the moment you ask about.
 def test_ex3_point_in_time(lab, full_store):
     r3, r9 = full_store.records["e003"], full_store.records["e009"]
     assert lab.is_current(r3, "2026-10-01T00:00:00-04:00") is True
@@ -70,6 +80,7 @@ def test_ex3_point_in_time(lab, full_store):
     assert lab.is_current(r9, NOW) is True
 
 
+# Archived records are not current, and times must be compared as datetimes, not text.
 def test_ex3_status_and_offsets(lab, full_store):
     r = dict(full_store.records["e002"], status="archived")
     assert lab.is_current(r, NOW) is False
@@ -79,6 +90,7 @@ def test_ex3_status_and_offsets(lab, full_store):
 
 
 # ---------------------------------------------------------------- Exercise 4
+# Exercise 4: both earlier pipe errors (two sessions) come back, best first, at most 3.
 def test_ex4_retrieve_multi_session(lab, full_store):
     hits = lab.retrieve(full_store, "syn_L01", PIPE_Q, NOW)
     ids = [h[0] for h in hits]
@@ -88,12 +100,14 @@ def test_ex4_retrieve_multi_session(lab, full_store):
     assert scores == sorted(scores, reverse=True), "best first"
 
 
+# Privacy: one learner must never retrieve another learner's memory.
 def test_ex4_isolation(lab, full_store):
     ids = [h[0] for h in lab.retrieve(full_store, "syn_L02", "I use a screen reader, describe every plot in words", NOW)]
     assert "e201" not in ids, "syn_L03's accessibility memory leaked to syn_L02"
     assert all(full_store.records[i]["learner_id"] == "syn_L02" for i in ids)
 
 
+# Retrieval respects corrections now and the old fact in the past.
 def test_ex4_corrections_and_time(lab, full_store):
     q = "Do I use RStudio Desktop or Posit Cloud?"
     now_ids = [h[0] for h in lab.retrieve(full_store, "syn_L01", q, NOW)]
@@ -102,6 +116,7 @@ def test_ex4_corrections_and_time(lab, full_store):
     assert "e003" in then_ids and "e009" not in then_ids, then_ids
 
 
+# Same behaviour on the unseen learner.
 def test_ex4_unseen_learner(lab, store):
     for e in UNSEEN:
         lab.write_memory(store, e)
@@ -112,6 +127,7 @@ def test_ex4_unseen_learner(lab, store):
 
 
 # ---------------------------------------------------------------- Exercise 5
+# Exercise 5: the untrusted-memory warning comes before the memory, and the question comes last.
 def test_ex5_prompt(lab, full_store):
     ids = ["e007", "e010"]
     p = lab.build_prompt(full_store, "syn_L01", PIPE_Q, ids)
@@ -121,6 +137,7 @@ def test_ex5_prompt(lab, full_store):
     assert p.index(lab.UNTRUSTED_NOTE) < p.index("[e007]") < p.index("LEARNER QUESTION")
 
 
+# An empty memory is stated clearly, and an injected instruction sits after the warning.
 def test_ex5_prompt_empty_and_injection(lab, store):
     p = lab.build_prompt(store, "syn_L02", "What accessibility needs did I mention?", [])
     assert "(no relevant memory found)" in p
@@ -132,6 +149,7 @@ def test_ex5_prompt_empty_and_injection(lab, store):
 
 
 # ---------------------------------------------------------------- Exercise 6
+# Exercise 6: deleting removes record and vector, survives a restart, and is no longer retrieved.
 def test_ex6_delete(lab, full_store, tmp_path):
     assert lab.delete_memory(full_store, "e202") is True
     assert "e202" not in full_store.records and "e202" not in full_store.vectors
@@ -142,6 +160,7 @@ def test_ex6_delete(lab, full_store, tmp_path):
 
 
 # ---------------------------------------------------------------- Stretch
+# Stretch A: strength halves after one half-life, and only episodic memories are archived.
 def test_stretch_a_decay_and_forget(lab, full_store):
     r = full_store.records["e002"]
     s0 = lab.strength(r, r["created_at"])
@@ -154,6 +173,7 @@ def test_stretch_a_decay_and_forget(lab, full_store):
     assert full_store.records["e009"]["status"] == "active", "semantic facts are not archived"
 
 
+# Stretch B: the summary replaces its episodes in retrieval.
 def test_stretch_b_consolidate(lab, full_store):
     sid = lab.consolidate(full_store, "syn_L01", ["e007", "e010"], NOW)
     rec = full_store.records[sid]

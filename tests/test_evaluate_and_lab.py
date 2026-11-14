@@ -1,14 +1,17 @@
+# Tests for the evaluation and the student lab.
 import sys
 from pathlib import Path
 
 from data360 import knowledge
 from data360.evaluate import evaluate, policy_checks
 
+# Reuse the lab's own checkpoint runner.
 LAB = Path(__file__).resolve().parents[1] / "lab"
 sys.path.insert(0, str(LAB))
 from check import run_checks  # noqa: E402
 
 
+# The core claim: the Data360 policy beats no memory and naive memory, with zero leaks.
 def test_memory_beats_baselines_canonical():
     s, _ = evaluate("canonical")
     s = s.set_index("condition")
@@ -19,6 +22,7 @@ def test_memory_beats_baselines_canonical():
     assert pol["correct abstentions"] == "3/3"
 
 
+# Same claim on the larger generated dataset.
 def test_memory_beats_baselines_generated():
     s, _ = evaluate("generated", ["no memory", "naive memory", "Data360 policy"])
     s = s.set_index("condition")
@@ -26,22 +30,26 @@ def test_memory_beats_baselines_generated():
     assert s.loc["Data360 policy", "probes with stale fact"] == 0
 
 
+# Every PASS/FAIL policy check passes.
 def test_policy_checks_all_pass():
     res = policy_checks(fresh_process=True)
     assert len(res) >= 10
     assert all(r["result"] == "PASS" for r in res), [r for r in res if r["result"] != "PASS"]
 
 
+# Reference search returns real documentation and Stack Overflow links.
 def test_reference_search_returns_real_sources():
     hits = knowledge.search("could not find function %>% dplyr pipe")
     assert hits and all(h["source_url"].startswith("https://") for h in hits)
 
 
+# The lab's reference solutions pass every checkpoint.
 def test_lab_solutions_pass_all_checks():
     rows = run_checks("solutions")
     assert len(rows) == 16 and all(r["status"] == "PASS" for r in rows), rows
 
 
+# The starter has every exercise left as TODO, so students start from scratch.
 def test_lab_starter_is_all_todo():
     rows = run_checks("starter")
     assert len(rows) == 16 and all(r["status"] == "TODO" for r in rows), rows

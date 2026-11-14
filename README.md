@@ -16,7 +16,7 @@ macOS / Linux:
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-pytest                      # 32 tests, about 15 seconds
+pytest                      # 51 tests, about 15 seconds
 streamlit run app.py        # opens http://localhost:8501
 ```
 
@@ -97,14 +97,42 @@ The lab keeps the structure of our earlier Data360 Streamlit lab (`lab.md` from 
 
 ## Options
 
+### Reply model (switch live, memory stays the same)
+
+The sidebar on every page has a **Reply model** switch: Offline template, OpenAI or Anthropic (plus Ollama when configured). Only providers whose API key is present are listed, and an optional **Model name** box overrides the default. Each chat reply and the memory inspector show which provider and model answered. The memory store, retrieval and the exact prompt are identical for every provider; only the final wording step changes. If a call fails (wrong key, no credits, unknown model, timeout), the reply falls back to the offline template with a warning and the app keeps running. Keys are never displayed.
+
+| Provider | Needs | Default model |
+|---|---|---|
+| Offline template | nothing (default when no key is set) | none |
+| OpenAI | `OPENAI_API_KEY` | `gpt-4o-mini` |
+| Anthropic | `ANTHROPIC_API_KEY` | `claude-haiku-5-5` |
+| Ollama (local, free) | `DATA360_LLM_PROVIDER=ollama` and a running Ollama server | `llama3.2` |
+
+Default choice when the app starts: `DATA360_LLM_PROVIDER` if set, else OpenAI when its key is present, else Anthropic, else the offline template. With a cloud provider, the question, the retrieved memories and the reference excerpts are sent to that provider (paid).
+
+### Where settings come from
+
+Settings are read in this order: environment variables, a local `.env` file (see `.env.example`), then Streamlit secrets. On Streamlit Community Cloud open **Manage app > Settings > Secrets** and add top-level lines such as:
+
+```toml
+OPENAI_API_KEY = "sk-..."
+ANTHROPIC_API_KEY = "sk-ant-..."
+```
+
+No `secrets.toml` is needed locally; the app runs without one. Never commit keys to GitHub.
+
+### All variables
+
 | Variable | Effect |
 |---|---|
+| `OPENAI_API_KEY` | enables OpenAI in the sidebar switch |
+| `ANTHROPIC_API_KEY` | enables Anthropic in the sidebar switch |
+| `DATA360_LLM_PROVIDER` | starting provider: `openai`, `anthropic`, `ollama` or `offline` |
+| `DATA360_OPENAI_MODEL`, `DATA360_ANTHROPIC_MODEL`, `DATA360_OLLAMA_MODEL` | default model per provider (the sidebar box overrides it) |
+| `DATA360_LLM_MODEL` | older setting: model for the provider named in `DATA360_LLM_PROVIDER` |
+| `OLLAMA_HOST` | Ollama server address (default `http://localhost:11434`) |
 | `DATA360_EMBEDDER=minilm` | use `all-MiniLM-L6-v2` (the proposal's model). Needs `pip install sentence-transformers` (large download, includes PyTorch) |
-| `DATA360_LLM_PROVIDER=ollama` | generate replies with a local Ollama model (free). `DATA360_LLM_MODEL` defaults to `llama3.2` |
-| `DATA360_LLM_PROVIDER=openai` + `OPENAI_API_KEY` | generate replies with OpenAI (paid; the question, memories and excerpts leave the machine). Default model `gpt-4o-mini` |
 | `DATA360_DB=path/to/file.db` | where the memory store lives (default `data/store/memory.db`) |
-
-You can put these in a `.env` file (see `.env.example`). Without them, replies use an offline template grounded in the retrieved memories and documents.
 
 ## Presentation demo (about 5 minutes)
 

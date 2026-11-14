@@ -1,7 +1,9 @@
+# Tests for the data files: real data is cached and attributed, synthetic data is reproducible.
 from data360 import datasets
 from data360.synthetic import generate
 
 
+# The cached real data is present, links are real and licence fields are kept.
 def test_real_data_cached():
     docs = datasets.reference_docs()
     so = datasets.stackoverflow_questions()
@@ -12,6 +14,7 @@ def test_real_data_cached():
     assert len(pen) == 344 and set(pen.species.unique()) == {"Adelie", "Chinstrap", "Gentoo"}
 
 
+# The course set matches the proposal: 3 learners, 28 events.
 def test_canonical_set_matches_proposal():
     ev = datasets.canonical_events()
     assert len(ev) == 28
@@ -22,6 +25,7 @@ def test_canonical_set_matches_proposal():
     assert len(datasets.canonical_probes()) == 14
 
 
+# Same seed, same data; events are in time order.
 def test_generator_is_seeded_and_ordered():
     a = generate(6, seed=7)
     b = generate(6, seed=7)
@@ -43,6 +47,7 @@ def test_generator_is_seeded_and_ordered():
             assert e["supersedes"] in ids
 
 
+# The generated dataset shipped with the project is present and large enough to evaluate on.
 def test_generated_files_exist():
     assert len(datasets.generated_events()) > 100
     assert len(datasets.generated_probes()) > 30

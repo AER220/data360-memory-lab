@@ -9,6 +9,7 @@ Sources (all public, see DATA_SOURCES.md for licences):
      (Stack Exchange API, CC BY-SA, attribution kept per row)
   3. The palmerpenguins dataset (CC0), the analysis data used in IST 387/687 style examples
 """
+# Here I download the real public data once and cache it, so the deployed app works offline.
 from __future__ import annotations
 
 import datetime as dt
@@ -22,10 +23,13 @@ from pathlib import Path
 import requests
 from bs4 import BeautifulSoup
 
+# Everything fetched is cached in data/real, so the app and tests never need the internet.
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "data" / "real"
+# A clear User-Agent is polite to the documentation sites and the Stack Exchange API.
 UA = {"User-Agent": "Data360-Memory-Lab/1.0 (course project; contact: student)"}
 
+# Real R documentation pages covering the topics beginners ask about most.
 DOC_PAGES = [
     # (doc_id, package, topic, url)
     ("dplyr_filter", "dplyr", "dplyr", "https://dplyr.tidyverse.org/reference/filter.html"),
@@ -52,6 +56,7 @@ DOC_PAGES = [
     ("palmerpenguins_home", "palmerpenguins", "datasets", "https://allisonhorst.github.io/palmerpenguins/"),
 ]
 
+# Error messages to search on Stack Overflow, each with the topic it belongs to.
 SO_QUERIES = [
     ("could not find function", "packages"),
     ("object not found", "objects"),
@@ -70,6 +75,7 @@ SO_QUERIES = [
 PENGUINS_URL = "https://raw.githubusercontent.com/allisonhorst/palmerpenguins/main/inst/extdata/penguins.csv"
 
 
+# Unescape HTML, replace dashes, and squeeze whitespace so chunks are clean plain text.
 def clean_text(s: str) -> str:
     s = html.unescape(s)
     s = s.replace("\u2014", ", ").replace("\u2013", "-")  # no em or en dashes in our text
@@ -78,6 +84,7 @@ def clean_text(s: str) -> str:
     return s.strip()
 
 
+# Split a page into chunks of about 120 words, small enough to quote in a prompt.
 def chunk(text: str, max_words: int = 120) -> list[str]:
     paras = [p.strip() for p in text.split("\n") if len(p.split()) >= 4]
     chunks, cur = [], []
@@ -92,12 +99,15 @@ def chunk(text: str, max_words: int = 120) -> list[str]:
     return chunks
 
 
+# Download each documentation page, strip navigation and scripts, and keep headings, paragraphs and
+# code.
 def fetch_docs() -> list[dict]:
     rows = []
     for doc_id, pkg, topic, url in DOC_PAGES:
         try:
             r = requests.get(url, headers=UA, timeout=30)
             r.raise_for_status()
+        # One missing page should not stop the whole fetch.
         except Exception as exc:  # keep going, record the miss
             print(f"  MISS {url}: {exc}", file=sys.stderr)
             continue
@@ -120,10 +130,13 @@ def fetch_docs() -> list[dict]:
                 "title": title, "text": c, "source_url": url, "source_type": "documentation",
             })
         print(f"  doc {doc_id}: {len(text)} chars")
+        # A short pause between requests so I do not hammer the servers.
         time.sleep(0.3)
     return rows
 
 
+# Search the public Stack Exchange API for the most-voted [r] questions per error message. No key is
+# needed for this small number of requests.
 def fetch_stackoverflow(per_query: int = 6) -> list[dict]:
     rows, seen = [], set()
     for q, topic in SO_QUERIES:
@@ -148,6 +161,7 @@ def fetch_stackoverflow(per_query: int = 6) -> list[dict]:
                 "answer_count": item.get("answer_count", 0),
                 "is_answered": item.get("is_answered", False),
                 "created_utc": dt.datetime.fromtimestamp(item["creation_date"], dt.timezone.utc).isoformat(),
+                # Author and link are kept on every row, as the CC BY-SA licence requires attribution.
                 "author": clean_text(item.get("owner", {}).get("display_name", "unknown")),
                 "link": item["link"],
                 "error_query": q, "topic": topic,
@@ -158,6 +172,7 @@ def fetch_stackoverflow(per_query: int = 6) -> list[dict]:
     return rows
 
 
+# Fetch everything, write the cache files and a manifest recording when and from where the data came.
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     fetched = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")

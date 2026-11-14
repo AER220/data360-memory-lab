@@ -8,6 +8,8 @@ Operations demonstrated (each one is a method below):
   FORGET       forget()         importance x exponential decay; weak episodic memories are archived
   DELETE       delete()         hard delete of text and vector, learner controlled
 """
+# The memory loop: write, retrieve, update, consolidate, forget and delete. This file is the heart
+# of the project.
 from __future__ import annotations
 
 import re
@@ -20,11 +22,14 @@ from .embeddings import get_embedder
 from .store import Memory, MemoryStore
 from .timeutil import days_between, iso, now, parse
 
+# Only stated preferences and corrections count as profile facts that are always shown to the model.
 PROFILE_EVENT_TYPES = {"preference_stated", "correction"}
 SLOT_TOPICS = {"environment", "style", "accessibility", "background", "pace", "os"}
 
 
 @dataclass
+# All the tuning knobs of the memory system live in one place, so the evaluation can compare a careful
+# policy with a naive one by changing only these values.
 class Policy:
     k: int = 3                      # memory budget in the prompt
     min_rel: float = 0.12           # relevance gate (cosine); below it a memory is not "relevant"
@@ -40,12 +45,15 @@ class Policy:
     decay_half_life_days: float = 21.0  # used by strength() and forget()
 
     @classmethod
+    # The naive baseline turns off every safeguard: no learner filter, no validity check, no write
+    # filter. The evaluation shows why that leaks and goes stale.
     def naive(cls) -> "Policy":
         return cls(filter_before_search=False, use_validity=False, write_filter=False,
                    inject_profile=False, min_rel=0.0, w_rec=0.0, w_imp=0.0)
 
 
 @dataclass
+# One retrieved memory plus the parts of its score, so the inspector can show why it was chosen.
 class Retrieved:
     memory: Memory
     relevance: float
@@ -60,6 +68,7 @@ class Retrieved:
 
 
 @dataclass
+# Everything retrieved for one question: the learner's profile and the top memories.
 class Context:
     learner_id: str
     query: str
@@ -75,6 +84,7 @@ class Context:
                 out.append(m.memory_id)
         return out
 
+    # Includes the episodes behind a summary, so evaluation still counts a hit after consolidation.
     def ids_with_sources(self) -> list[str]:
         out = list(self.ids)
         for m in self.profile + [r.memory for r in self.memories]:
@@ -82,6 +92,8 @@ class Context:
         return out
 
 
+# Write filter: I only keep events that will help later. Small talk and distractors never enter
+# memory.
 def should_store(event: dict) -> bool:
     """WRITE FILTER: keep useful learning events, skip small talk and distractors."""
     if event.get("memory_type", "none") in ("none", "", None):
@@ -91,6 +103,8 @@ def should_store(event: dict) -> bool:
     return float(event.get("importance", 5)) >= 3
 
 
+# A slot names an updatable fact (environment, style, ...). Two facts in the same slot cannot both be
+# current.
 def infer_slot(event: dict) -> str:
     if event.get("slot"):
         return event["slot"]
@@ -101,12 +115,14 @@ def infer_slot(event: dict) -> str:
     return ""
 
 
+# Shortens an episode for the extractive summary written by consolidate().
 def _short(text: str, n: int = 110) -> str:
     text = re.sub(r"^(Correction:|Got Error:|Again got)\s*", "", text.strip(), flags=re.I)
     first = re.split(r"(?<=[.;])\s", text)[0]
     return first if len(first) <= n else first[: n - 3].rstrip() + "..."
 
 
+# The memory loop itself. Pages talk to this class; it talks to the store and the embedder.
 class MemoryManager:
     def __init__(self, store: MemoryStore, embedder=None, policy: Policy | None = None):
         self.store = store
@@ -115,6 +131,8 @@ class MemoryManager:
         self._reembed_if_needed()
 
     # ------------------------------------------------------------------ helpers
+    # If the embedder changed since the vectors were saved, I re-embed every memory so old and new
+    # vectors are comparable.
     def _reembed_if_needed(self) -> None:
         sig = self.store.get_meta("embedder_signature")
         if sig == self.embedder.signature:
@@ -126,6 +144,8 @@ class MemoryManager:
                 self.store.set_vector(m.memory_id, v)
         self.store.set_meta("embedder_signature", self.embedder.signature)
 
+    # Decides whether a memory counts at a given moment: it must exist already, be active and not yet
+    # superseded. as_of lets the Timeline replay the past.
     def is_valid(self, m: Memory, as_of=None) -> bool:
         t = parse(as_of) if as_of else None
         if t is not None and parse(m.created_at) > t:
@@ -138,10 +158,13 @@ class MemoryManager:
             return False
         return True
 
+    # All memories of one learner that are valid at that time.
     def current(self, learner_id: str, as_of=None) -> list[Memory]:
         return [m for m in self.store.list(learner_id) if self.is_valid(m, as_of)]
 
     # ------------------------------------------------------------------ WRITE + UPDATE
+    # WRITE: apply the write filter, then save text, metadata and vector together. Called only after
+    # the learner approves (or when replaying the dataset).
     def write(self, event: dict, now_ts=None) -> tuple[str, str]:
         """Write one approved event. Returns (status, memory_id). Applies corrections in time order."""
         if self.policy.write_filter and not should_store(event):
@@ -149,6 +172,8 @@ class MemoryManager:
                            event.get("event_id", ""), event.get("text", "")[:80])
             return "skipped", ""
         created = iso(parse(event.get("timestamp") or now_ts))
+        # I keep the dataset's event id when there is one, so memory ids match the proposal (e001,
+        # e009 ...).
         mid = event.get("event_id") or f"m_{uuid.uuid4().hex[:8]}"
         m = Memory(
             memory_id=mid, learner_id=event["learner_id"], session_id=event.get("session_id", ""),
@@ -159,6 +184,8 @@ class MemoryManager:
         )
         self.store.add(m, self.embedder.encode([m.text])[0])
         self.store.log(created, m.learner_id, "write", mid, m.text[:80])
+        # I do not delete the old fact: I close it with valid_to, so history is kept but retrieval
+        # skips it.
         # UPDATE: explicit supersedes link, or same profile slot replaced by a newer statement
         targets = []
         if m.supersedes:
@@ -175,6 +202,8 @@ class MemoryManager:
                 self.store.log(created, m.learner_id, "supersede", t, f"replaced by {mid}")
         return "saved", mid
 
+    # Replays a dataset in time order, as if the sessions happened one after another. upto_session and
+    # upto_time support the Timeline slider.
     def load_events(self, events: list[dict], upto_session: str | None = None, upto_time=None) -> dict:
         """Replay events in time order (sessions arrive one after another)."""
         saved = skipped = 0
@@ -194,6 +223,8 @@ class MemoryManager:
             skipped += status == "skipped"
         return {"saved": saved, "skipped": skipped}
 
+    # When the learner edits a memory I write a new current version that supersedes the old one,
+    # instead of overwriting the text.
     def correct(self, memory_id: str, new_text: str, now_ts=None) -> str:
         """Learner edit: the new text becomes current, the old row stays as history."""
         old = self.store.get(memory_id)
@@ -207,15 +238,20 @@ class MemoryManager:
         return mid
 
     # ------------------------------------------------------------------ RETRIEVE
+    # Recency halves every recency_half_life_days days since the memory was last used.
     def recency(self, m: Memory, as_of) -> float:
         ref = m.last_accessed or m.created_at
         age = max(0.0, days_between(ref, as_of))
         return float(0.5 ** (age / self.policy.recency_half_life_days))
 
+    # RETRIEVE: the careful order is filter first (this learner, valid rows), then score by relevance,
+    # recency and importance.
     def retrieve(self, learner_id: str, query: str, as_of=None, k: int | None = None, touch: bool = False) -> list[Retrieved]:
         p = self.policy
         k = k or p.k
         as_of_dt = parse(as_of) if as_of else now()
+        # Filtering before the similarity search is what makes cross-learner leaks impossible, not
+        # just unlikely.
         if p.filter_before_search:
             cands = [m for m in self.store.list(learner_id) if self.is_valid(m, as_of_dt)]
         else:  # naive: search everybody, everything, then rank by similarity alone
@@ -229,20 +265,29 @@ class MemoryManager:
             v = vecs.get(m.memory_id)
             if v is None:
                 continue
+            # Vectors are unit length, so the dot product is cosine similarity.
             rel = float(np.dot(q, v))
+            # Below the relevance gate a memory is left out even if it is recent or important, so
+            # unrelated facts do not crowd the prompt.
             if rel < p.min_rel:
                 continue
             rec = self.recency(m, as_of_dt)
             imp = m.importance / 10.0
+            # Weighted score in the style of Park et al. (2023): relevance plus weighted recency and
+            # importance.
             out.append(Retrieved(m, rel, rec, imp, p.w_rel * rel + p.w_rec * rec + p.w_imp * imp))
         out.sort(key=lambda r: r.score, reverse=True)
         out = out[:k]
+        # When a memory is actually used I record the access; this keeps useful memories fresh
+        # (spacing effect).
         if touch:
             for r in out:
                 self.store.update(r.memory.memory_id, access_count=r.memory.access_count + 1,
                                   last_accessed=iso(as_of_dt))
         return out
 
+    # Profile facts are injected on every turn, because preferences such as accessibility needs apply
+    # to every answer.
     def profile(self, learner_id: str, as_of=None) -> list[Memory]:
         if not self.policy.inject_profile:
             return []
@@ -251,6 +296,7 @@ class MemoryManager:
         prof.sort(key=lambda m: (m.importance, m.created_at), reverse=True)
         return prof[: self.policy.profile_max]
 
+    # Combines profile and retrieved memories, dropping duplicates already in the profile.
     def context(self, learner_id: str, query: str, as_of=None, touch: bool = False) -> Context:
         prof = self.profile(learner_id, as_of)
         mems = self.retrieve(learner_id, query, as_of=as_of, touch=touch)
@@ -258,6 +304,7 @@ class MemoryManager:
         return Context(learner_id, query, prof, [r for r in mems if r.memory.memory_id not in prof_ids])
 
     # ------------------------------------------------------------------ FORGET
+    # FORGET uses strength = importance x exponential decay. Each retrieval stretches the half-life.
     def strength(self, m: Memory, as_of=None) -> float:
         """Memory strength: importance x exponential decay; each retrieval slows the decay (spacing effect)."""
         ref = m.last_accessed or m.created_at
@@ -265,6 +312,7 @@ class MemoryManager:
         half = self.policy.decay_half_life_days * (1 + 0.5 * m.access_count)
         return float(m.importance / 10.0 * 0.5 ** (age / half))
 
+    # Weak episodic memories are archived, not deleted, so forgetting can be undone with restore().
     def forget(self, learner_id: str, as_of=None, threshold: float = 0.1, types=("episodic",)) -> list[str]:
         """Archive (not delete) weak memories. Profile facts and procedures are kept unless listed in types."""
         as_of = as_of or now()
@@ -276,6 +324,7 @@ class MemoryManager:
                 archived.append(m.memory_id)
         return archived
 
+    # Undo for forgetting or consolidation.
     def restore(self, memory_id: str) -> None:
         m = self.store.get(memory_id)
         if m:
@@ -283,6 +332,8 @@ class MemoryManager:
             self.store.log(iso(now()), m.learner_id, "restore", memory_id, "")
 
     # ------------------------------------------------------------------ CONSOLIDATE
+    # CONSOLIDATE: several episodes on the same topic become one semantic summary, which saves prompt
+    # space and shows a pattern.
     def consolidate(self, learner_id: str, as_of=None, min_group: int = 2, summarizer=None) -> list[str]:
         """Group current episodic memories by topic; groups of >= min_group become one semantic summary.
 
@@ -299,6 +350,8 @@ class MemoryManager:
                 continue
             mems.sort(key=lambda m: m.created_at)
             sessions = ", ".join(sorted({m.session_id for m in mems}))
+            # An LLM summariser can be plugged in; by default I join short versions of the episodes so
+            # the result is deterministic.
             if summarizer:
                 text = summarizer([m.text for m in mems])
             else:
@@ -310,6 +363,8 @@ class MemoryManager:
                   "importance": min(10.0, max(m.importance for m in mems) + 1), "text": text,
                   "synthetic": all(m.synthetic for m in mems)}
             self.write(ev)
+            # The summary remembers its sources, and the episodes are marked consolidated so retrieval
+            # skips them.
             self.store.update(sid, source_ids=[m.memory_id for m in mems])
             for m in mems:
                 self.store.update(m.memory_id, status="consolidated", consolidated_into=sid)
@@ -318,6 +373,7 @@ class MemoryManager:
         return new_ids
 
     # ------------------------------------------------------------------ DELETE
+    # DELETE: learner-controlled hard delete, logged for the audit trail.
     def delete(self, memory_id: str) -> bool:
         m = self.store.get(memory_id)
         ok = self.store.delete(memory_id)
@@ -325,6 +381,8 @@ class MemoryManager:
             self.store.log(iso(now()), m.learner_id, "delete", memory_id, "text and vector removed")
         return ok
 
+    # A copy that shares the same store and embedder but uses different policy settings, used by the
+    # evaluation.
     def with_policy(self, **changes) -> "MemoryManager":
         mm = MemoryManager.__new__(MemoryManager)
         mm.store, mm.embedder, mm.policy = self.store, self.embedder, replace(self.policy, **changes)
