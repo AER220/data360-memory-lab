@@ -1,0 +1,12 @@
+# Core (no API key, no model download)
+streamlit>=1.50
+pandas>=2.0
+numpy>=1.26
+scikit-learn>=1.4
+altair>=5.0
+requests>=2.31
+pytest>=8.0
+# Only needed to refresh the cached real data (scripts/fetch_real_data.py)
+beautifulsoup4>=4.12
+# Optional: proposal's embedding model. pip install sentence-transformers, then DATA360_EMBEDDER=minilm
+# sentence-transformers>=3.0
