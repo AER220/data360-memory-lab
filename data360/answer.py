@@ -3,7 +3,7 @@ only the final step, turning the finished prompt into text, does.
 
 Providers
   offline    built-in template grounded in the retrieved memories (no key, nothing leaves the machine)
-  openai     needs OPENAI_API_KEY      (default model gpt-4o-mini)
+  openai     needs OPENAI_API_KEY      (default model gpt-6-luna)
   anthropic  needs ANTHROPIC_API_KEY   (default model claude-haiku-5-5)
   ollama     local server, opt in with DATA360_LLM_PROVIDER=ollama (default model llama3.2)
 
@@ -21,26 +21,34 @@ import requests
 
 from .config import has, setting
 from .memory import Context
+from .prompting import split_prompt
 
 # Patterns used by the offline template: personal questions, profile slots and injection attempts.
 PERSONAL = re.compile(r"\b(i|my|me|mine|i'm|i've|do i|did i)\b", re.I)
 SLOT_HINTS = [
     ("environment", r"environment|rstudio|posit|setup|ide|laptop|where do i (run|code)"),
-    ("style", r"explanation|explain to me|how do i like|answers?\b.*(short|long)|compare .* pandas|pandas"),
+    # Questions about style also match typos like "prefere" and phrasings like "my answers/responses".
+    ("style", r"explanation|explain to me|how do i like|prefer\w*|\bmy (answers?|responses?|replies)\b|answers?\b.*(short|long)|compare .* pandas|pandas"),
     ("accessibility", r"accessib|screen reader|present plots|colou?r blind|describe .*plot|how should you present"),
     ("background", r"background|experience|new to coding"),
 ]
 # Memories that look like instructions ('ignore previous ...') are shown as data and never obeyed.
 INJECTION = re.compile(r"ignore (all|the|previous|any)|reveal|system prompt|other learners", re.I)
 # When memory has nothing on a personal question, the template says so instead of guessing.
+GENERAL_HOWTO = re.compile(r"\s*(how (do|can|should|would) i|how to|what is|what does|what are)\b", re.I)
 NO_RECORD = "I do not have a record of that in your memory, so I will not guess."
 
 # Provider names, display labels, default model ids and the key each provider needs.
 OFFLINE, OPENAI, ANTHROPIC, OLLAMA = "offline", "openai", "anthropic", "ollama"
 LABELS = {OFFLINE: "Offline template", OPENAI: "OpenAI", ANTHROPIC: "Anthropic", OLLAMA: "Ollama (local)"}
-# gpt-4o-mini is cheap and supported until January 2027; claude-haiku-5-5 is Anthropic's fast, low-
-# cost current model. Both can be changed in the sidebar.
-DEFAULT_MODELS = {OPENAI: "gpt-4o-mini", ANTHROPIC: "claude-haiku-5-5", OLLAMA: "llama3.2"}
+# gpt-6-luna is OpenAI's current low-cost model ($0.10 / $0.50 per million tokens) and its named
+# replacement for gpt-4o-mini, which shuts down on 14 January 2027. claude-haiku-5-5 is Anthropic's
+# fast, low-cost current model. For stronger answers type claude-sonnet-5-5 or gpt-6.1-sol in the
+# sidebar's model box (both cost more). A bigger model cannot fix a prompt that lacks the memory, so
+# the memory fixes come first; the model choice only changes answer quality.
+DEFAULT_MODELS = {OPENAI: "gpt-6-luna", ANTHROPIC: "claude-haiku-5-5", OLLAMA: "llama3.2"}
+# Stronger (and pricier) models I suggest in the sidebar help, verified on the providers' model pages.
+STRONGER_MODELS = {OPENAI: "gpt-6.1-sol", ANTHROPIC: "claude-sonnet-5-5"}
 KEY_NAMES = {OPENAI: "OPENAI_API_KEY", ANTHROPIC: "ANTHROPIC_API_KEY"}
 # Shown in the UI to make clear that switching models never changes memory.
 MEMORY_NOTE = ("Memory store, retrieval and the prompt are identical for every provider; "
@@ -106,36 +114,56 @@ def describe(p: str, model: str = "") -> str:
 
 # ---------- calls ----------
 
+# Every provider gets the same two parts: the system text (rules) and the user text (memory status,
+# preferences, profile, retrieved memory, references, question). I split them with split_prompt(), so
+# OpenAI, Anthropic and Ollama receive identical content, each through its own proper system channel.
+# Before this fix everything was pasted into one user message starting with "SYSTEM:", which a model
+# can treat as untrusted user text, and that made answers inconsistent between providers.
+
 # I import each SDK only when it is used, so the offline app still runs if a package is missing.
 def _call_openai(prompt: str, model: str, timeout: int) -> str:
     from openai import OpenAI
 
+    system, user = split_prompt(prompt)
     client = OpenAI(api_key=setting(KEY_NAMES[OPENAI]), timeout=timeout, max_retries=1)
-    kwargs = {"model": model, "messages": [{"role": "user", "content": prompt}]}
-    # Older GPT models accept a low temperature for steadier answers; newer reasoning models reject
-    # it, so I only send it to the older ones.
-    if model.startswith(("gpt-4", "gpt-3.5")):  # newer reasoning models reject a custom temperature
-        kwargs["temperature"] = 0.2
+    messages = ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": user}]
+    kwargs = {"model": model, "messages": messages}
+    # Older GPT models accept temperature 0, which makes the same question give the same answer.
+    # Newer reasoning models (gpt-5, gpt-6 and o-series) reject a custom temperature; for them I ask
+    # for a low reasoning effort, which keeps replies fast and cheap but still follows the
+    # preferences carefully.
+    if model.startswith(("gpt-4", "gpt-3.5")):
+        kwargs["temperature"] = 0
+    elif model.startswith(("gpt-5", "gpt-6", "o3", "o4")):
+        kwargs["reasoning_effort"] = "low"
     resp = client.chat.completions.create(**kwargs)
     return (resp.choices[0].message.content or "").strip()
 
 
-# Anthropic's Messages API. The prompt is sent as one user message, exactly as for OpenAI.
+# Anthropic's Messages API takes the system text as a separate `system` parameter and the rest as one
+# user message: the same two parts OpenAI gets.
 def _call_anthropic(prompt: str, model: str, timeout: int) -> str:
     from anthropic import Anthropic
 
+    system, user = split_prompt(prompt)
     client = Anthropic(api_key=setting(KEY_NAMES[ANTHROPIC]), timeout=timeout, max_retries=1)
-    resp = client.messages.create(model=model, max_tokens=2048,
-                                  messages=[{"role": "user", "content": prompt}])
+    kwargs = {"model": model, "max_tokens": 2048, "messages": [{"role": "user", "content": user}]}
+    if system:
+        kwargs["system"] = system
+    resp = client.messages.create(**kwargs)
     # Newer Claude models can return thinking blocks before the answer, so I keep only the text
     # blocks.
     return "".join(getattr(b, "text", "") for b in resp.content if getattr(b, "type", "") == "text").strip()
 
 
-# Ollama runs a free model locally over HTTP.
+# Ollama runs a free model locally over HTTP; its generate API also has a separate system field.
 def _call_ollama(prompt: str, model: str, timeout: int) -> str:
+    system, user = split_prompt(prompt)
     host = setting("OLLAMA_HOST", "http://localhost:11434")
-    r = requests.post(f"{host}/api/generate", timeout=timeout, json={"model": model, "prompt": prompt, "stream": False})
+    body = {"model": model, "prompt": user, "stream": False}
+    if system:
+        body["system"] = system
+    r = requests.post(f"{host}/api/generate", timeout=timeout, json=body)
     r.raise_for_status()
     return r.json()["response"]
 
@@ -189,7 +217,10 @@ def _safe_error(exc: Exception) -> str:
 def template_reply(question: str, ctx: Context | None, references: list[dict], memory_on: bool) -> str:
     q = question.lower()
     parts: list[str] = []
-    personal = bool(PERSONAL.search(question))
+    # A general how-to question ("How do I filter rows in R?") contains "I" but is not about the
+    # learner's past, so the template must not answer it with "I do not have a record of that".
+    general = bool(GENERAL_HOWTO.match(q)) and not re.search(r"\b(my|mine|me)\b", q)
+    personal = bool(PERSONAL.search(question)) and not general
     answered = False
     if memory_on and ctx is not None:
         # If the question is about a profile slot, answer with the current fact and cite its id.
@@ -214,7 +245,8 @@ def template_reply(question: str, ctx: Context | None, references: list[dict], m
         if personal and not answered:
             parts.insert(0, NO_RECORD)
         style = [m for m in ctx.profile if m.slot == "style"]
-        if style and answered:
+        # Stated style preferences are acknowledged on every answer, including general questions.
+        if style and (answered or not personal):
             parts.append(f"(I will follow your stated preference: {style[0].text})")
     # Memory switched off: be honest that nothing about the learner is available.
     elif personal:

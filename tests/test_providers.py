@@ -159,6 +159,16 @@ def _fake_anthropic(calls, text="Claude says hi", fail=None):
     return mod
 
 
+# Pulls (system, user) out of whatever was sent to an SDK, so payloads from different providers can be
+# compared directly.
+def _payload(name, kw):
+    if name == "openai":
+        system = "".join(m["content"] for m in kw["messages"] if m["role"] == "system")
+        user = "".join(m["content"] for m in kw["messages"] if m["role"] == "user")
+        return system, user
+    return kw.get("system", ""), kw["messages"][0]["content"]
+
+
 @pytest.fixture()
 def both_keys(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", FAKE_OPENAI)
@@ -180,14 +190,16 @@ def test_same_prompt_and_memory_for_every_provider(mm, monkeypatch, both_keys):
     a = answer.reply(q, prompt, ctx, [], True, provider_name="openai")
     b = answer.reply(q, prompt, ctx, [], True, provider_name="anthropic", model="claude-sonnet-5-5")
     c = answer.reply(q, prompt, ctx, [], True, provider_name="offline")
-    assert (a.provider, a.model, a.text) == ("openai", "gpt-4o-mini", "OpenAI says hi")
+    assert (a.provider, a.model, a.text) == ("openai", "gpt-6-luna", "OpenAI says hi")
     assert (b.provider, b.model, b.text) == ("anthropic", "claude-sonnet-5-5", "Claude says hi")
     assert c.provider == "offline" and "e009" in c.text
-    sent = [kw["messages"][0]["content"] for _, kw in calls]
-    assert sent == [prompt, prompt]  # identical prompt regardless of provider
+    sent = [_payload(name, kw) for name, kw in calls]
+    # identical system text and identical user text regardless of provider
+    assert sent == [(prompt.system, prompt.user), (prompt.system, prompt.user)]
+    assert str(prompt) == f"SYSTEM: {prompt.system}\n\n{prompt.user}"
     assert calls[1][1]["model"] == "claude-sonnet-5-5"
     assert "e009" in prompt and not a.warning and not b.warning
-    assert a.label == "OpenAI gpt-4o-mini" and b.label == "Anthropic claude-sonnet-5-5"
+    assert a.label == "OpenAI gpt-6-luna" and b.label == "Anthropic claude-sonnet-5-5"
     # nothing about the store changed by replying
     after = mm.context("syn_L01", q)
     assert build_prompt(q, after, [], memory_on=True, budget=mm.policy.k) == prompt
@@ -281,14 +293,14 @@ def test_sidebar_switch_and_answered_by(monkeypatch, tmp_path):
     at.chat_input[0].set_value("Which R environment do I use now?").run()
     assert not at.exception
     text = _all_text(at)
-    assert "OpenAI says hi" in text and "Answered by: OpenAI gpt-4o-mini" in text
+    assert "OpenAI says hi" in text and "Answered by: OpenAI gpt-6-luna" in text
     # switch to Anthropic: same memory, same prompt
     next(s for s in at.sidebar.selectbox if s.label == "Provider").set_value("anthropic").run()
     at.chat_input[0].set_value("Which R environment do I use now?").run()
     assert not at.exception
     text = _all_text(at)
     assert "Claude says hi" in text and "Answered by: Anthropic claude-haiku-5-5" in text
-    assert calls[0][1]["messages"] == calls[1][1]["messages"]
+    assert _payload(*calls[0]) == _payload(*calls[1])
     assert FAKE_OPENAI not in text and FAKE_ANTHROPIC not in text
 
 

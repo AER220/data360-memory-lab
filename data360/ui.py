@@ -6,7 +6,7 @@ from __future__ import annotations
 import streamlit as st
 
 from . import datasets
-from .answer import (DEFAULT_MODELS, KEY_NAMES, LABELS, MEMORY_NOTE, OFFLINE, available_providers,
+from .answer import (DEFAULT_MODELS, KEY_NAMES, LABELS, MEMORY_NOTE, OFFLINE, STRONGER_MODELS, available_providers,
                      default_model, default_provider, describe)
 from .config import load_dotenv
 from .memory import MemoryManager
@@ -120,7 +120,8 @@ def llm_selector() -> None:
 
         st.sidebar.text_input("Model name (optional)", value=ss["llm_models"].get(p, ""), key=wkey,
                               placeholder=default_model(p) or DEFAULT_MODELS.get(p, ""), on_change=_set_model,
-                              help=f"Leave empty for the default ({default_model(p)}).")
+                              help=f"Leave empty for the default ({default_model(p)})."
+                              + (f" For stronger but pricier answers try {STRONGER_MODELS[p]}." if p in STRONGER_MODELS else ""))
         _, model = llm_choice()
         # Privacy notice: with a cloud model, the question, memories and excerpts leave the app.
         st.sidebar.warning(f"LLM: {describe(p, model)}. Questions, memories and reference excerpts "

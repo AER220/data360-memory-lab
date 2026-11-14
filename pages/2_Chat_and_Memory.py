@@ -27,11 +27,28 @@ ss.setdefault("pending", {})
 ss.setdefault("last", {})
 
 # Pick which fictional learner you are. Memory is always looked up for this learner only.
+# I keep the choice in my own session key ("learner_pick"). Without this, Streamlit reset the box to
+# the first learner whenever the list of learners changed (for example right after a new learner's
+# first memory was saved), so later questions could silently run as a different learner.
 learners = mm.store.learners()
+options = learners + ["+ new learner"]
+if ss.get("learner_pick") not in options:
+    ss["learner_pick"] = options[0]
+# Before the box is drawn I copy my saved choice into the widget's own key when the widget has lost
+# it (page change), holds a stale value, or the app asked to select a learner (after a first save).
+if ss.pop("_force_learner", False) or ss.get("_learner_widget") not in options:
+    ss["_learner_widget"] = ss["learner_pick"]
+
+
+def _pick_learner():
+    ss["learner_pick"] = ss["_learner_widget"]
+
+
 c1, c2, c3 = st.columns([2, 2, 2])
-choice = c1.selectbox("Learner", learners + ["+ new learner"], index=0 if learners else 0)
+choice = c1.selectbox("Learner", options, key="_learner_widget", on_change=_pick_learner)
 if choice == "+ new learner":
-    new = c1.text_input("New learner id (pseudonym only)", value="syn_new01")
+    new = c1.text_input("New learner id (pseudonym only)", value=ss.get("new_learner_id", "syn_new01"))
+    ss["new_learner_id"] = new
     learner = new.strip() or "syn_new01"
 else:
     learner = choice
@@ -42,10 +59,22 @@ if c2.button("Start a new session"):
     ss["session_ids"][learner] = f"live_{uuid.uuid4().hex[:4]}"
     ss["chat"][learner] = []
 c2.caption(f"Session `{ss['session_ids'][learner]}`. Memories approved now carry this session id.")
-# Memory on/off switch for the live comparison with a normal chatbot.
-memory_on = c3.toggle("Use long-term memory", value=True,
+# Memory on/off switch for the live comparison with a normal chatbot. Like the learner, the value
+# lives in my own session keys, so it survives switching provider, switching page and reruns; it only
+# changes when the learner flips it.
+ss.setdefault("memory_on", True)
+ss.setdefault("use_refs", True)
+
+
+def _flip(name):
+    ss[name] = ss[f"_{name}_widget"]
+
+
+memory_on = c3.toggle("Use long-term memory", value=ss["memory_on"], key="_memory_on_widget",
+                      on_change=_flip, args=("memory_on",),
                       help="Off: no personal memory is read or written. Reference docs stay available.")
-use_refs = c3.toggle("Use reference docs (RAG)", value=True)
+use_refs = c3.toggle("Use reference docs (RAG)", value=ss["use_refs"], key="_use_refs_widget",
+                     on_change=_flip, args=("use_refs",))
 
 if not learners:
     st.warning("The store is empty. Click **Load course set (3 learners)** in the sidebar, or create a new learner and start talking.")
@@ -64,7 +93,10 @@ with chat_col:
                 st.warning(msg["warning"])
             st.markdown(msg["content"])
             if msg.get("answered_by"):
-                st.caption(f"Answered by: {msg['answered_by']}")
+                # Each reply records who answered AND whether memory was on for that turn, so a
+                # transcript always shows the real memory state.
+                mem = "on" if msg.get("memory_on", True) else "off"
+                st.caption(f"Answered by: {msg['answered_by']} | memory {mem}")
     question = st.chat_input("Ask Data360 an R question, or tell it something about you")
     # The memory loop for one question: retrieve, build the prompt, reply, then propose a memory.
     if question:
@@ -82,11 +114,18 @@ with chat_col:
             ans = reply(question, prompt, ctx, refs, memory_on, provider_name=chosen, model=model)
         ss["chat"].setdefault(learner, []).extend([
             {"role": "user", "content": question},
-            {"role": "assistant", "content": ans.text, "answered_by": ans.label, "warning": ans.warning}])
+            {"role": "assistant", "content": ans.text, "answered_by": ans.label, "warning": ans.warning,
+             "memory_on": memory_on}])
         ss["last"][learner] = {"ctx": ctx, "prompt": prompt, "refs": refs, "answered_by": ans.label,
-                               "requested": chosen, "warning": ans.warning}
+                               "requested": chosen, "warning": ans.warning, "memory_on": memory_on}
         # Propose a memory from the message, but do not save it. The learner decides below.
-        ss["pending"][learner] = [dict(c, text=c["text"]) for c in propose(question)] if memory_on else []
+        # New proposals are ADDED to the waiting cards, each with its own id. Before this fix a new
+        # message replaced the card, but the text box kept the old text (same widget key), so
+        # approving saved "I prefer short answers" as an episodic question instead of a semantic
+        # preference, and it never reached the learner's profile.
+        if memory_on:
+            ss["pending"].setdefault(learner, [])
+            ss["pending"][learner] += [dict(c, cid=uuid.uuid4().hex[:8]) for c in propose(question)]
         st.rerun()
 
     # Human in the loop: nothing enters long-term memory until the learner approves (and can edit) the
@@ -94,22 +133,29 @@ with chat_col:
     pend = ss["pending"].get(learner) or []
     if pend:
         st.markdown("##### Review before saving")
-        for i, cand in enumerate(pend):
+        for cand in list(pend):
+            # Every card has its own id, so its text box, its buttons and the saved memory always
+            # belong to the same proposal.
+            cid = cand.get("cid", "x")
             with st.container(border=True):
                 st.caption(f"Proposed {cand['memory_type']} memory ({cand['event_type']}, topic {cand['topic']}, "
                            f"importance {cand['importance']}). Nothing is stored until you approve.")
-                text = st.text_area("Memory text", cand["text"], key=f"pend_{learner}_{i}")
+                text = st.text_area("Memory text", cand["text"], key=f"pend_{learner}_{cid}")
                 b1, b2 = st.columns(2)
-                if b1.button("Approve", key=f"ok_{learner}_{i}", type="primary"):
-                    ev = dict(cand, text=text, learner_id=learner, session_id=ss["session_ids"][learner],
+                if b1.button("Approve", key=f"ok_{learner}_{cid}", type="primary"):
+                    ev = {k: v for k, v in cand.items() if k != "cid"}
+                    ev.update(text=text, learner_id=learner, session_id=ss["session_ids"][learner],
                               timestamp=iso(now()), synthetic=True)
                     # Only now is the memory written to the persistent store.
                     status, mid = mm.write(ev)
-                    ss["pending"][learner] = []
+                    ss["pending"][learner] = [c for c in pend if c.get("cid") != cid]
+                    # A brand-new learner now exists in the store; keep them selected.
+                    ss["learner_pick"] = learner
+                    ss["_force_learner"] = True
                     st.toast(f"{status}: {mid}" if mid else status)
                     st.rerun()
-                if b2.button("Reject", key=f"no_{learner}_{i}"):
-                    ss["pending"][learner] = []
+                if b2.button("Reject", key=f"no_{learner}_{cid}"):
+                    ss["pending"][learner] = [c for c in pend if c.get("cid") != cid]
                     st.rerun()
 
 # Memory inspector: shows exactly what was retrieved and the exact prompt, so the behaviour is
@@ -125,11 +171,14 @@ with insp_col:
             st.warning(last["warning"])
         st.caption(MEMORY_NOTE)
         ctx = last["ctx"]
-        if ctx is None:
+        if ctx is None or not last.get("memory_on", True):
             st.info("Memory was off for the last turn: nothing personal was read.")
         else:
-            st.markdown("**Profile injected (current facts)**")
-            st.dataframe(pd.DataFrame([{"id": m.memory_id, "session": m.session_id, "text": m.text} for m in ctx.profile]),
+            # Preferences and facts are always injected when memory is on, whatever the question. The
+            # 'kind' column shows which ones the model is told to apply to every answer.
+            st.markdown("**Profile injected on every turn (preferences are applied to every answer)**")
+            st.dataframe(pd.DataFrame([{"kind": "preference" if m in ctx.preferences else "fact", "id": m.memory_id,
+                                        "session": m.session_id, "text": m.text} for m in ctx.profile]),
                          width="stretch", hide_index=True)
             st.markdown(f"**Retrieved memories** (max {mm.policy.k}; score = relevance + {mm.policy.w_rec} x recency + "
                         f"{mm.policy.w_imp} x importance)")
@@ -139,7 +188,8 @@ with insp_col:
             st.dataframe(pd.DataFrame([{"id": r["chunk_id"], "sim": r["similarity"], "source": r.get("source_url")}
                                        for r in last["refs"]]), width="stretch", hide_index=True,
                          column_config={"source": st.column_config.LinkColumn()})
-        with st.expander("Exact prompt sent to the model", expanded=False):
+        # The prompt is shown as SYSTEM part + user part, exactly as sent to every provider.
+        with st.expander("Exact prompt sent to the model (same for every provider)", expanded=False):
             st.code(last["prompt"], language="text")
     else:
         st.caption("Ask a question to see what was retrieved and the exact prompt.")

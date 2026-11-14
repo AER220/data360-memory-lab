@@ -25,6 +25,14 @@ from .timeutil import days_between, iso, now, parse
 # Only stated preferences and corrections count as profile facts that are always shown to the model.
 PROFILE_EVENT_TYPES = {"preference_stated", "correction"}
 SLOT_TOPICS = {"environment", "style", "accessibility", "background", "pace", "os"}
+# Slots that describe HOW the learner wants to be taught. The prompt asks the model to apply these to
+# every answer, not just to answer questions about them.
+PREFERENCE_SLOTS = {"style", "accessibility", "pace"}
+
+
+def is_preference(m) -> bool:
+    """True for an approved semantic fact about how the learner wants answers presented."""
+    return m.memory_type == "semantic" and (m.slot in PREFERENCE_SLOTS or m.topic in PREFERENCE_SLOTS)
 
 
 @dataclass
@@ -74,6 +82,16 @@ class Context:
     query: str
     profile: list[Memory] = field(default_factory=list)
     memories: list[Retrieved] = field(default_factory=list)
+
+    # Here I split the profile into presentation preferences (applied to every answer) and other
+    # facts (used as context), so the prompt can treat them differently.
+    @property
+    def preferences(self) -> list[Memory]:
+        return [m for m in self.profile if is_preference(m)]
+
+    @property
+    def facts(self) -> list[Memory]:
+        return [m for m in self.profile if not is_preference(m)]
 
     @property
     def ids(self) -> list[str]:
@@ -238,9 +256,11 @@ class MemoryManager:
         return mid
 
     # ------------------------------------------------------------------ RETRIEVE
-    # Recency halves every recency_half_life_days days since the memory was last used.
+    # Recency halves every recency_half_life_days days since the memory was written. I measure from
+    # created_at, not last_accessed, so asking the same question twice ranks memories the same way
+    # both times. Access still matters for forgetting (see strength()).
     def recency(self, m: Memory, as_of) -> float:
-        ref = m.last_accessed or m.created_at
+        ref = m.created_at
         age = max(0.0, days_between(ref, as_of))
         return float(0.5 ** (age / self.policy.recency_half_life_days))
 
@@ -293,8 +313,11 @@ class MemoryManager:
             return []
         prof = [m for m in self.current(learner_id, as_of)
                 if m.memory_type == "semantic" and m.event_type in PROFILE_EVENT_TYPES]
-        prof.sort(key=lambda m: (m.importance, m.created_at), reverse=True)
-        return prof[: self.policy.profile_max]
+        # Slot facts (environment, style, accessibility ...) come first and are never cut, because
+        # each slot holds only one current fact and a dropped preference would silently stop applying.
+        prof.sort(key=lambda m: (bool(m.slot), m.importance, m.created_at), reverse=True)
+        n_slots = sum(1 for m in prof if m.slot)
+        return prof[: max(self.policy.profile_max, n_slots)]
 
     # Combines profile and retrieved memories, dropping duplicates already in the profile.
     def context(self, learner_id: str, query: str, as_of=None, touch: bool = False) -> Context:

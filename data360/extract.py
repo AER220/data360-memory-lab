@@ -12,6 +12,9 @@ import re
 # free and testable.
 ENV_WORDS = r"(rstudio|posit cloud|posit|vs ?code|jupyter|positron|windows|mac|macbook|chromebook|linux)"
 SMALL_TALK = r"\b(weather|raining|coffee|lunch|football|soup|recipe|wi-?fi|bookstore|weekend|hello|hi there|thanks?)\b"
+# Words about how an answer is presented. Together with "I prefer/want/need" they mark a style
+# preference, and I accept typos such as "prefere" because learners type fast.
+PRESENTATION = r"\b(short|shorter|brief|concise|detailed|long|longer|simple|step[- ]by[- ]step|comments?|bullets?|examples?|answers?|responses?|replies|explanations?)\b"
 R_WORDS = r"(\br\b|dplyr|ggplot|tidyr|readr|%>%|\|>|lm\(|data ?frame|tibble|function|vector|factor|csv|json|plot|mean|na\.rm|package|library|pipe|error|warning|regression|penguins)"
 
 
@@ -23,6 +26,9 @@ def propose(message: str) -> list[dict]:
     low = msg.lower()
     if not msg:
         return []
+    # A question such as "how do I prefer my answers?" asks ABOUT a preference; it must never be
+    # saved as one, even though it contains the word "prefer".
+    is_question = msg.endswith("?") or bool(re.match(r"(how|what|which|why|when|where|who|do|does|did|can|could|should|is|are)\b", low))
     # Words like 'actually' or 'switched' mark a correction, which later replaces the old fact instead
     # of sitting next to it.
     is_correction = bool(re.search(r"\b(correction|actually|not anymore|no longer|switched|moved to|changed to|instead now)\b", low))
@@ -37,8 +43,11 @@ def propose(message: str) -> list[dict]:
     if re.search(r"\b(i (now )?use|i'?m using|i am using|i switched|i moved|i work in|my laptop|i code in)\b", low) and re.search(ENV_WORDS, low):
         return [dict(memory_type="semantic", event_type="correction" if is_correction else "preference_stated",
                      topic="environment", slot="environment", importance=8 if is_correction else 6, text=msg)]
-    # Stated preferences about explanations go into the 'style' slot.
-    if re.search(r"\b(i prefer|i like|please (always|keep|give|stop|don'?t|use|explain|show)|explain .* (step|short|simple)|i learn better)\b", low):
+    # Stated preferences about explanations or answer length go into the 'style' slot as semantic
+    # memories, so they join the learner's profile and are applied to every later answer.
+    if not is_question and (re.search(r"\b(i prefer|i like|please (always|keep|give|stop|don'?t|use|explain|show)|explain .* (step|short|simple)|i learn better)\b", low)
+                            or (re.search(r"\bi (really |would |'d )?(prefer\w*|want|need|like)\b", low) and re.search(PRESENTATION, low))
+                            or re.search(r"\bkeep (it|them|answers?|responses?|explanations?|replies) (short|brief|simple|concise)", low)):
         return [dict(memory_type="semantic", event_type="correction" if is_correction else "preference_stated",
                      topic="style", slot="style", importance=8 if is_correction else 7, text=msg)]
     # A strategy that worked becomes a procedural memory: a tutoring move worth repeating.

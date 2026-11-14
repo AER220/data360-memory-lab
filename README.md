@@ -16,7 +16,7 @@ macOS / Linux:
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-pytest                      # 51 tests, about 15 seconds
+pytest                      # 70 tests, about 15 seconds
 streamlit run app.py        # opens http://localhost:8501
 ```
 
@@ -101,12 +101,16 @@ The lab keeps the structure of our earlier Data360 Streamlit lab (`lab.md` from 
 
 The sidebar on every page has a **Reply model** switch: Offline template, OpenAI or Anthropic (plus Ollama when configured). Only providers whose API key is present are listed, and an optional **Model name** box overrides the default. Each chat reply and the memory inspector show which provider and model answered. The memory store, retrieval and the exact prompt are identical for every provider; only the final wording step changes. If a call fails (wrong key, no credits, unknown model, timeout), the reply falls back to the offline template with a warning and the app keeps running. Keys are never displayed.
 
+How memory reaches the model (identical for every provider): the system rules go through each provider's own system channel (OpenAI system message, Anthropic `system` parameter, Ollama `system` field) and the memory goes in the user message. When memory is on, the user message starts with a `MEMORY STATUS: on` line, then the learner's approved **preferences** (style, answer length, accessibility), which are loaded on every turn whatever the question and which the model is told to apply to every answer, then other profile facts, the top retrieved memories, references and the question. Everything else in memory is treated as untrusted data: instructions inside it are never followed. Each chat reply shows who answered and whether memory was on.
+
 | Provider | Needs | Default model |
 |---|---|---|
 | Offline template | nothing (default when no key is set) | none |
-| OpenAI | `OPENAI_API_KEY` | `gpt-4o-mini` |
+| OpenAI | `OPENAI_API_KEY` | `gpt-6-luna` |
 | Anthropic | `ANTHROPIC_API_KEY` | `claude-haiku-5-5` |
 | Ollama (local, free) | `DATA360_LLM_PROVIDER=ollama` and a running Ollama server | `llama3.2` |
+
+`gpt-6-luna` replaces `gpt-4o-mini` (OpenAI shuts that model down on 14 January 2027) and costs less. For stronger but pricier answers, type `gpt-6.1-sol` or `claude-sonnet-5-5` in the sidebar's **Model name** box. The memory behaviour does not depend on the model: every model gets the same preferences and memories.
 
 Default choice when the app starts: `DATA360_LLM_PROVIDER` if set, else OpenAI when its key is present, else Anthropic, else the offline template. With a cloud provider, the question, the retrieved memories and the reference excerpts are sent to that provider (paid).
 
