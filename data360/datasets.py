@@ -38,9 +38,19 @@ def stackoverflow_questions() -> tuple[dict, ...]:
 
 
 @lru_cache(maxsize=1)
-# Short notes I wrote for the lab, each one linking to its public source.
+# My R reference notes: short notes we wrote in our own words, one per R topic in the IST 387/687
+# syllabus, each linked to an official documentation page that a script fetched and checked.
+def r_notes() -> tuple[dict, ...]:
+    """R reference notes (shared knowledge for every user), each with a verified source_url."""
+    return tuple(_jsonl(REAL / "r_reference_notes.jsonl"))
+
+
+@lru_cache(maxsize=1)
+# The 8 short lab notes from v3. Since v4 they are no longer searched or cited (the R reference notes
+# replace them). I keep them only because they are part of the fixed text the memory embedder learns
+# its vocabulary from, so personal memory retrieval and the evaluation numbers stay exactly as in v3.
 def lab_notes() -> tuple[dict, ...]:
-    """Short notes written for the lab, each pointing to a public source."""
+    """v3 lab notes, used only in the embedder's background corpus (not searched, not cited)."""
     return tuple(_jsonl(REAL / "lab_reference_notes.jsonl"))
 
 

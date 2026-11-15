@@ -3,6 +3,8 @@
 # the model switch.
 from __future__ import annotations
 
+import re
+
 import streamlit as st
 
 from . import datasets
@@ -19,6 +21,26 @@ load_dotenv()
 # Shown on every page: all learners are fictional and real student data must not be typed in.
 DISCLAIMER = ("All learners in this app are fictional (synthetic). Reference material is real public documentation "
               "and public Stack Overflow questions. Do not type real names, grades, NetIDs or classmates' work.")
+
+
+# The dropdown entry that opens the "new user" name box on the Chat page.
+NEW_USER = "+ new learner"
+# Demo learners from the shipped synthetic datasets: syn_L01 to syn_L03 and syn_G001 onward.
+DEMO_ID = re.compile(r"^syn_(L|G)\d+$")
+
+
+# A user id is a short pseudonym: letters, numbers, _ and -, at most 30 characters. Anything else is
+# dropped, so a name can never break the page or the database query.
+def clean_user_id(raw: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_-]", "", (raw or "").strip().replace(" ", "_"))[:30]
+
+
+# The learners shown in the dropdowns: the demo learners in the store plus the users created in this
+# browser session. Other classmates' users stay out of the list.
+def visible_learners(mm: MemoryManager, my_users: list[str] | None = None) -> list[str]:
+    demo = [lid for lid in mm.store.learners() if DEMO_ID.match(lid)]
+    mine = [u for u in (my_users or []) if u and u not in demo]
+    return demo + mine
 
 
 # cache_resource keeps one MemoryManager per database file for the whole server, so the embedder is

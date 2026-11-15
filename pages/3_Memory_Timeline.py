@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 from data360.timeutil import iso, parse
-from data360.ui import manager, sidebar
+from data360.ui import manager, sidebar, visible_learners
 
 st.set_page_config(page_title="Memory Timeline", page_icon="🕒", layout="wide")
 # Every page shares one cached memory manager, so all pages see the same store.
@@ -17,10 +17,14 @@ sidebar(mm)
 st.title("Memory Timeline")
 st.caption("How one learner's memory changes over the semester: written, superseded, consolidated, forgotten.")
 
-# Nothing to show until a dataset is loaded, so I stop early with a hint.
-learners = mm.store.learners()
+# Nothing to show until a dataset is loaded, so I stop early with a hint. Like the Chat page, I list the
+# demo learners and the users created in this browser session (with saved memories), not every
+# classmate's user.
+stored = set(mm.store.learners())
+learners = [lid for lid in visible_learners(mm, st.session_state.get("my_users", [])) if lid in stored]
 if not learners:
-    st.warning("The store is empty. Click **Load course set (3 learners)** in the sidebar.")
+    st.warning("No memories to show yet. Click **Load course set (3 learners)** in the sidebar, or save a memory "
+               "on the Chat page first.")
     st.stop()
 c1, c2 = st.columns(2)
 learner = c1.selectbox("Learner", learners)

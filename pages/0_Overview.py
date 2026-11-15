@@ -37,10 +37,10 @@ st.graphviz_chart("""
 digraph G {
   rankdir=TB; nodesep=0.5; node [shape=box, style="rounded,filled", fillcolor="#E7EEF6", fontname="Helvetica", fontsize=13];
   Q [label="Learner question"]; F [label="Filter: this learner,\\ncurrent records only"];
-  S [label="Score: relevance +\\nrecency + importance"]; P [label="Prompt: profile + top 3\\nmemories + reference docs\\n(labelled as data)"];
-  A [label="Reply\\n(offline, OpenAI or Anthropic;\\nsame prompt)"]; W [label="Propose memory\\nlearner approves"];
+  S [label="Score: relevance +\\nrecency + importance"]; P [label="Prompt: profile + top 3\\nmemories + reference notes\\n(labelled as data)"];
+  A [label="Reply + Sources block\\n(offline, OpenAI or Anthropic;\\nsame prompt)"]; W [label="Propose memory\\nlearner approves"];
   DB [label="Persistent store\\n(SQLite + vectors)", shape=cylinder, fillcolor="#F6E7D8"];
-  R [label="Reference knowledge\\nreal R docs + Stack Overflow", shape=cylinder, fillcolor="#E3F1E3"];
+  R [label="Reference knowledge (shared)\\nR reference notes + R docs\\n+ Stack Overflow", shape=cylinder, fillcolor="#E3F1E3"];
   M [label="Maintenance: update,\\nconsolidate, forget, delete", fillcolor="#FCEBD5"];
   {rank=same; Q; F; S;} {rank=same; P; R;} {rank=same; A; W; DB; M;}
   Q -> F -> S -> P -> A -> W -> DB; DB -> F [style=dashed, label=" read"]; R -> P; M -> DB;
@@ -51,12 +51,15 @@ digraph G {
 st.markdown("### What is in this project")
 m = datasets.manifest()
 ev_c, ev_g = datasets.canonical_events(), datasets.generated_events()
-c = st.columns(5)
-c[0].metric("Real doc chunks", len(datasets.reference_docs()), help="tidyverse, base R, jsonlite, palmerpenguins pages")
-c[1].metric("Real Stack Overflow questions", len(datasets.stackoverflow_questions()))
-c[2].metric("Penguins rows (real, CC0)", len(datasets.penguins()))
-c[3].metric("Course-set events", len(ev_c), help="3 fictional learners, written by hand")
-c[4].metric("Generated events", len(ev_g), help=f"{len({e['learner_id'] for e in ev_g})} seeded synthetic learners")
+c = st.columns(6)
+notes = datasets.r_notes()
+c[0].metric("R reference notes", len(notes), help=f"Our own wording, {len({n['source_url'] for n in notes})} verified "
+            "official documentation links, covering lectures 1 to 12 of IST 387/687")
+c[1].metric("Real doc chunks", len(datasets.reference_docs()), help="tidyverse, base R, jsonlite, palmerpenguins pages")
+c[2].metric("Real Stack Overflow questions", len(datasets.stackoverflow_questions()))
+c[3].metric("Penguins rows (real, CC0)", len(datasets.penguins()))
+c[4].metric("Course-set events", len(ev_c), help="3 fictional learners, written by hand")
+c[5].metric("Generated events", len(ev_g), help=f"{len({e['learner_id'] for e in ev_g})} seeded synthetic learners")
 # Shows when the real data was fetched, from data/real/manifest.json.
 if m:
     st.caption(f"Real data fetched {m.get('fetched_utc', '?')} (UTC) and cached in data/real/. See DATA_SOURCES.md.")
@@ -64,7 +67,7 @@ if m:
 st.markdown("""
 ### How to use the pages
 1. **Data Explorer**: browse the real reference data and the synthetic learner histories; generate new learners with a seed.
-2. **Chat and Memory**: talk to Data360 as a learner, approve memories, and inspect the exact prompt.
+2. **Chat and Memory**: talk to Data360 as a learner (or create your own user with **+ new learner**), approve memories, and inspect the exact prompt. Every answer ends with a **Sources** block.
 3. **Memory Timeline**: see facts being written, superseded, consolidated and forgotten over the semester.
 4. **Evaluation**: compare no memory, naive memory and the Data360 policy, and run the PASS/FAIL policy checks.
 5. **Lab**: the 40 minute student lab, with checkpoints you can run from the page.

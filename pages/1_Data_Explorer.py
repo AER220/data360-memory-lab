@@ -18,8 +18,30 @@ st.title("Data Explorer")
 # memory.
 st.caption("Real data is reference knowledge (the same for every learner). Synthetic data is memory (private to one learner).")
 
-t_docs, t_so, t_pen, t_syn, t_gen = st.tabs(
-    ["Real R documentation", "Real Stack Overflow errors", "Penguins (analysis data)", "Synthetic learners", "Generator"])
+t_notes, t_docs, t_so, t_pen, t_syn, t_gen = st.tabs(
+    ["R reference notes", "Real R documentation", "Real Stack Overflow errors", "Penguins (analysis data)",
+     "Synthetic learners", "Generator"])
+
+# Tab 0: our R reference notes, one or more per syllabus lecture, each with its verified source link.
+with t_notes:
+    notes = pd.DataFrame(datasets.r_notes())
+    if notes.empty:
+        st.warning("No reference notes found in data/real/r_reference_notes.jsonl.")
+    else:
+        st.markdown(f"**{len(notes)} notes** written in our own words, covering every R topic in the IST 387/687 "
+                    f"schedule. **{int(notes.get('verified', pd.Series(dtype=bool)).fillna(False).sum())}** source "
+                    "links were fetched and checked (HTTP 200, topic words on the page) by "
+                    "`scripts/verify_reference_notes.py`. Every user sees the same notes.")
+        st.altair_chart(alt.Chart(notes).mark_bar().encode(x=alt.X("count()", title="notes"),
+                        y=alt.Y("syllabus_topic", sort=None, title="syllabus"), tooltip=["syllabus_topic", "count()"]),
+                        width="stretch")
+        nq = st.text_input("Search notes", key="noteq")
+        view = notes
+        if nq:
+            view = view[(view.title + " " + view.text).str.contains(nq, case=False, regex=False)]
+        st.dataframe(view[["note_id", "syllabus_topic", "title", "text", "source_url", "verified_utc"]],
+                     width="stretch", height=380, hide_index=True,
+                     column_config={"source_url": st.column_config.LinkColumn()})
 
 # Tab 1: the real R documentation chunks used for RAG, with a filter and text search.
 with t_docs:

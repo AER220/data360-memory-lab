@@ -10,7 +10,7 @@ from data360.answer import MEMORY_NOTE, reply
 from data360.extract import propose
 from data360.prompting import build_prompt
 from data360.timeutil import iso, now
-from data360.ui import DISCLAIMER, llm_choice, manager, sidebar
+from data360.ui import DISCLAIMER, NEW_USER, clean_user_id, llm_choice, manager, sidebar, visible_learners
 
 st.set_page_config(page_title="Chat and Memory", page_icon="💬", layout="wide")
 # Every page shares one cached memory manager, so all pages see the same store.
@@ -26,12 +26,17 @@ ss.setdefault("chat", {})
 ss.setdefault("pending", {})
 ss.setdefault("last", {})
 
-# Pick which fictional learner you are. Memory is always looked up for this learner only.
+# Pick which learner you are. Memory is always looked up for this learner only.
 # I keep the choice in my own session key ("learner_pick"). Without this, Streamlit reset the box to
 # the first learner whenever the list of learners changed (for example right after a new learner's
 # first memory was saved), so later questions could silently run as a different learner.
-learners = mm.store.learners()
-options = learners + ["+ new learner"]
+# The list shows the fictional demo learners plus the users created in THIS browser session, not
+# every classmate's user, so on the shared class app nobody browses other people's memory by
+# accident. A returning classmate types the same name again to get their memory back. This is a
+# convenience, not a login: anyone who knows a name can open it, which the caption says.
+ss.setdefault("my_users", [])
+learners = visible_learners(mm, ss["my_users"])
+options = learners + [NEW_USER]
 if ss.get("learner_pick") not in options:
     ss["learner_pick"] = options[0]
 # Before the box is drawn I copy my saved choice into the widget's own key when the widget has lost
@@ -45,11 +50,26 @@ def _pick_learner():
 
 
 c1, c2, c3 = st.columns([2, 2, 2])
-choice = c1.selectbox("Learner", options, key="_learner_widget", on_change=_pick_learner)
-if choice == "+ new learner":
-    new = c1.text_input("New learner id (pseudonym only)", value=ss.get("new_learner_id", "syn_new01"))
-    ss["new_learner_id"] = new
-    learner = new.strip() or "syn_new01"
+choice = c1.selectbox("Learner", options, key="_learner_widget", on_change=_pick_learner,
+                      help="Pick a demo learner, or choose '+ new learner' to create your own user.")
+if choice == NEW_USER:
+    # Creating a user is just typing a name: the user exists as soon as you chat. Every user sees the
+    # same shared R reference notes and has a private memory that starts empty.
+    # A random starting name, so two classmates who do not change it never share a memory.
+    ss.setdefault("new_learner_id", f"user_{uuid.uuid4().hex[:4]}")
+    new = c1.text_input("New learner id (pseudonym only)", value=ss["new_learner_id"],
+                        help="Letters, numbers, _ or -, up to 30 characters. Use a nickname, not your NetID. "
+                             "Type the same name next time to get your memory back.")
+    clean = clean_user_id(new)
+    if new.strip() and clean != new.strip():
+        c1.caption(f"Using `{clean}` (only letters, numbers, _ and - are kept).")
+    ss["new_learner_id"] = clean or ss["new_learner_id"]
+    learner = ss["new_learner_id"]
+    if learner not in ss["my_users"]:
+        ss["my_users"].append(learner)
+    known = len(mm.store.list(learner))
+    c1.caption(f"Welcome back, `{learner}`: {known} memories found." if known else
+               f"New user `{learner}`: your private memory is empty; the R reference notes are ready.")
 else:
     learner = choice
 # Each chat gets a session id, so approved memories record which session they came from.
@@ -72,19 +92,20 @@ def _flip(name):
 
 memory_on = c3.toggle("Use long-term memory", value=ss["memory_on"], key="_memory_on_widget",
                       on_change=_flip, args=("memory_on",),
-                      help="Off: no personal memory is read or written. Reference docs stay available.")
-use_refs = c3.toggle("Use reference docs (RAG)", value=ss["use_refs"], key="_use_refs_widget",
+                      help="Off: no personal memory is read or written. The R reference notes stay available.")
+use_refs = c3.toggle("Use R reference notes (RAG)", value=ss["use_refs"], key="_use_refs_widget",
                      on_change=_flip, args=("use_refs",))
 
 if not learners:
-    st.warning("The store is empty. Click **Load course set (3 learners)** in the sidebar, or create a new learner and start talking.")
+    st.info("Type a name in **New learner id** and start chatting to create your own user, or click "
+            "**Load course set (3 learners)** in the sidebar for the demo learners.")
 
 chat_col, insp_col = st.columns([3, 2])
 
 with chat_col:
     st.markdown("#### Chat")
     st.caption("Try: `Which R environment do I use now?`, `Why do I keep getting could not find function %>%?`, "
-               "`I prefer comments on every line of R code.`, `What is my favourite colour?`")
+               "`How do I make a word cloud?`, `I prefer comments on every line of R code.`, `What is my favourite colour?`")
     # Redraw the conversation, including any fallback warning and the 'Answered by' label of each
     # reply.
     for msg in ss["chat"].get(learner, []):
@@ -114,7 +135,8 @@ with chat_col:
             ans = reply(question, prompt, ctx, refs, memory_on, provider_name=chosen, model=model)
         ss["chat"].setdefault(learner, []).extend([
             {"role": "user", "content": question},
-            {"role": "assistant", "content": ans.text, "answered_by": ans.label, "warning": ans.warning,
+            # The stored reply ends with the Sources block (ids, titles, verified links).
+            {"role": "assistant", "content": ans.full_text, "answered_by": ans.label, "warning": ans.warning,
              "memory_on": memory_on}])
         ss["last"][learner] = {"ctx": ctx, "prompt": prompt, "refs": refs, "answered_by": ans.label,
                                "requested": chosen, "warning": ans.warning, "memory_on": memory_on}
@@ -184,10 +206,13 @@ with insp_col:
                         f"{mm.policy.w_imp} x importance)")
             st.dataframe(pd.DataFrame([r.row() for r in ctx.memories]), width="stretch", hide_index=True)
         if last["refs"]:
-            st.markdown("**Reference docs (shared, not memory)**")
-            st.dataframe(pd.DataFrame([{"id": r["chunk_id"], "sim": r["similarity"], "source": r.get("source_url")}
+            st.markdown("**Shared references (R notes, docs, Stack Overflow; not memory)**")
+            st.dataframe(pd.DataFrame([{"id": r["chunk_id"], "kind": r.get("kind"), "title": r.get("title", ""),
+                                        "sim": r["similarity"], "source": r.get("source_url")}
                                        for r in last["refs"]]), width="stretch", hide_index=True,
                          column_config={"source": st.column_config.LinkColumn()})
+        else:
+            st.caption("No reference note matched the last question, so the answer says the notes do not cover it.")
         # The prompt is shown as SYSTEM part + user part, exactly as sent to every provider.
         with st.expander("Exact prompt sent to the model (same for every provider)", expanded=False):
             st.code(last["prompt"], language="text")

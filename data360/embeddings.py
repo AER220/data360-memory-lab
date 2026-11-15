@@ -78,8 +78,10 @@ class MiniLMEmbedder:
         return _normalise(self.model.encode(list(texts), normalize_embeddings=True))
 
 
-# The corpus TF-IDF learns its vocabulary from: real docs, Stack Overflow questions, lab notes and
-# synthetic event texts.
+# The corpus TF-IDF learns its vocabulary from: real docs, Stack Overflow questions, the v3 lab notes
+# and synthetic event texts. I deliberately leave the R reference notes out: they have their own
+# word-level index in knowledge.py, and keeping this corpus fixed means adding notes never changes how
+# personal memories are retrieved.
 def background_corpus() -> list[str]:
     # I import inside the function to avoid a circular import between embeddings, datasets and
     # synthetic.

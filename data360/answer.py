@@ -15,13 +15,14 @@ If an API call fails, the reply falls back to the offline template with a warnin
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import requests
 
 from .config import has, setting
 from .memory import Context
 from .prompting import split_prompt
+from .sources import NOT_COVERED, with_sources
 
 # Patterns used by the offline template: personal questions, profile slots and injection attempts.
 PERSONAL = re.compile(r"\b(i|my|me|mine|i'm|i've|do i|did i)\b", re.I)
@@ -251,11 +252,21 @@ def template_reply(question: str, ctx: Context | None, references: list[dict], m
     # Memory switched off: be honest that nothing about the learner is available.
     elif personal:
         parts.append("Memory is off, so I cannot recall anything about you from earlier sessions.")
-    if references:
-        parts.append("Course reference:")
-        for r in references:
+    # The reference notes answer general R questions. Each one is cited by id; its link is in the
+    # Sources block that reply() adds at the end.
+    notes = [r for r in references if r.get("kind") == "note"]
+    others = [r for r in references if r.get("kind") != "note"]
+    if notes:
+        parts.append("From the course reference notes:")
+        parts += [f"- [{r['chunk_id']}] **{r.get('title', '')}**: {r['text']}" for r in notes]
+    if others:
+        parts.append("Related material:")
+        for r in others:
             label = "Stack Overflow thread" if r.get("kind") == "stackoverflow" else r.get("title", "doc")
-            parts.append(f"- {label}: {r['text'][:220].strip()}... ({r.get('source_url', '')})")
+            parts.append(f"- [{r.get('chunk_id')}] {label}: {r['text'][:220].strip()}...")
+    # A general question with no matching note: say so plainly instead of guessing.
+    if not notes and not personal:
+        parts.append(f"{NOT_COVERED} Try R's own help (for example ?mean) or ask your lab instructor.")
     if not parts:
         parts.append("I could not find anything relevant. Could you share the exact R error message and the line of code?")
     out = []
@@ -274,10 +285,17 @@ class Reply:
     model: str             # model id that answered ("" for offline)
     requested: str         # provider the user picked
     warning: str = ""      # set when a call failed and we fell back to the template
+    references: list = field(default_factory=list)  # shared references given to this answer
 
     @property
     def label(self) -> str:
         return describe(self.provider, self.model)
+
+    # What the learner sees: the answer, then the Sources block (ids, titles, verified links). I keep
+    # it separate from .text so the raw model output can still be inspected and tested.
+    @property
+    def full_text(self) -> str:
+        return with_sources(self.text, self.references)
 
     # Lets older code keep writing `text, mode = reply(...)`.
     def __iter__(self):  # allows: text, mode = reply(...)
@@ -290,17 +308,18 @@ def reply(question: str, prompt: str, ctx: Context | None, references: list[dict
           provider_name: str | None = None, model: str | None = None) -> Reply:
     """The prompt is built before this call and is the same for every provider."""
     p = provider_name or default_provider()
+    refs = list(references or [])
     if p == OFFLINE:
-        return Reply(template_reply(question, ctx, references, memory_on), OFFLINE, "", OFFLINE)
+        return Reply(template_reply(question, ctx, references, memory_on), OFFLINE, "", OFFLINE, references=refs)
     used_model = (model or "").strip() or default_model(p)
     try:
-        return Reply(llm_complete(prompt, p, used_model), p, used_model, p)
+        return Reply(llm_complete(prompt, p, used_model), p, used_model, p, references=refs)
     # Any failure (bad key, no credits, network, unknown model) falls back to the offline template
     # with a clear warning.
     except Exception as exc:  # never crash the class demo
         warning = (f"{describe(p, used_model)} failed ({_safe_error(exc)}). "
                    "Showing the offline template instead; memory was not affected.")
-        return Reply(template_reply(question, ctx, references, memory_on), OFFLINE, "", p, warning)
+        return Reply(template_reply(question, ctx, references, memory_on), OFFLINE, "", p, warning, references=refs)
 
 
 # Used by the evaluation to count honest 'I do not know' answers.
