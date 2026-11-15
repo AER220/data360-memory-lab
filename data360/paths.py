@@ -12,7 +12,8 @@ DATA = ROOT / "data"
 REAL = DATA / "real"
 SYNTH = DATA / "synthetic"
 STORE_DIR = DATA / "store"
-LAB = ROOT / "lab"
+# Lab 9 student files (handout, starter, our Lab 3 code) shown on the Lab page.
+LAB9 = ROOT / "lab9"
 
 
 # Here I decide where the memory database lives. DATA360_DB lets the tests and the lab use a throwaway

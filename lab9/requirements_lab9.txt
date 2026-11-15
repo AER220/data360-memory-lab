@@ -1,0 +1,6 @@
+# Lab 9 needs these (add any you already have for Labs 1 to 8, e.g. pypdf for Lab 4)
+streamlit
+openai
+chromadb
+# newer sqlite for chroma on Streamlit Cloud (Linux only, same fix as Lab 4)
+pysqlite3-binary; sys_platform == "linux"

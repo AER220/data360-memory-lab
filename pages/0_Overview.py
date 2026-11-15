@@ -70,7 +70,7 @@ st.markdown("""
 2. **Chat and Memory**: talk to Data360 as a learner (or create your own user with **+ new learner**), approve memories, and inspect the exact prompt. Every answer ends with a **Sources** block.
 3. **Memory Timeline**: see facts being written, superseded, consolidated and forgotten over the semester.
 4. **Evaluation**: compare no memory, naive memory and the Data360 policy, and run the PASS/FAIL policy checks.
-5. **Lab**: the 40 minute student lab, with checkpoints you can run from the page.
+5. **Lab 9: Memory Lab**: the 40 minute student lab as clickable steps, showing what changes from the Lab 3 chatbot to Lab 9 in every part.
 
 Start by clicking **Load course set (3 learners)** in the sidebar.
 """)

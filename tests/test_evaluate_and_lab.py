@@ -1,14 +1,6 @@
-# Tests for the evaluation and the student lab.
-import sys
-from pathlib import Path
-
+# Tests for the evaluation. The Lab 9 page has its own tests in test_lab9_page.py.
 from data360 import knowledge
 from data360.evaluate import evaluate, policy_checks
-
-# Reuse the lab's own checkpoint runner.
-LAB = Path(__file__).resolve().parents[1] / "lab"
-sys.path.insert(0, str(LAB))
-from check import run_checks  # noqa: E402
 
 
 # The core claim: the Data360 policy beats no memory and naive memory, with zero leaks.
@@ -41,15 +33,3 @@ def test_policy_checks_all_pass():
 def test_reference_search_returns_real_sources():
     hits = knowledge.search("could not find function %>% dplyr pipe")
     assert hits and all(h["source_url"].startswith("https://") for h in hits)
-
-
-# The lab's reference solutions pass every checkpoint.
-def test_lab_solutions_pass_all_checks():
-    rows = run_checks("solutions")
-    assert len(rows) == 16 and all(r["status"] == "PASS" for r in rows), rows
-
-
-# The starter has every exercise left as TODO, so students start from scratch.
-def test_lab_starter_is_all_todo():
-    rows = run_checks("starter")
-    assert len(rows) == 16 and all(r["status"] == "TODO" for r in rows), rows

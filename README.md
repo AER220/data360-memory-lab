@@ -1,6 +1,6 @@
 # Data360-Memory: long-term memory demo and student lab (Streamlit)
 
-Data360-Memory is a study companion for an introductory data science course taught in R (IST 387/687). A normal chatbot forgets a learner when the session ends. Data360 keeps approved facts **outside the model**, in a persistent store, and reads them back in later sessions, even after a restart. This project is the complete teaching build: a multi-page Streamlit app, real public reference data, a seeded synthetic learner generator, a memory vs no-memory evaluation, and a 40 minute student lab with starter code, checkpoints, solutions and an instructor guide.
+Data360-Memory is a study companion for an introductory data science course taught in R (IST 387/687). A normal chatbot forgets a learner when the session ends. Data360 keeps approved facts **outside the model**, in a persistent store, and reads them back in later sessions, even after a restart. This project is the complete teaching build: a multi-page Streamlit app, real public reference data, a seeded synthetic learner generator, a memory vs no-memory evaluation, and the Lab 9 page that walks the class through our 40 minute student lab (Lab 9: Chatbot with Long-Term Memory).
 
 Built for **Building Human-Centered AI Applications**, Syracuse University, advanced topic *Long-Term Memory* (presentation 17 November 2026). Team: Edouard Ransome Agbor, Lulu Rashid Massasi, Cheikh Fall, Isaiah Patterson and Matthew Brown.
 
@@ -16,7 +16,7 @@ macOS / Linux:
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-pytest                      # 95 tests, about 15 seconds
+pytest                      # about 15 seconds
 streamlit run app.py        # opens http://localhost:8501
 ```
 
@@ -56,7 +56,7 @@ Three memory types are kept per learner: **episodic** (past errors and questions
 3. **Chat and Memory**: chat as a demo learner or create your own user (**+ new learner**, then type a nickname), approve or reject proposed memories, memory on/off, inspector with scores, references and the exact prompt, edit and delete. Every answer ends with a Sources block.
 4. **Memory Timeline**: written, superseded, consolidated and archived memories over the semester; forgetting curves; consolidate, forget and restore buttons; audit log.
 5. **Evaluation**: no memory vs naive memory vs Data360 policy (plus consolidation and forgetting variants), and 11 PASS/FAIL policy checks.
-6. **Lab**: the handout, a **Run checkpoints** button, the five exam questions with Reveal toggles, and the instructor guide.
+6. **Lab 9: Memory Lab**: the Lab 9 handout as clickable steps (Goal, Parts A to E with their timings, Stretch, Submit) with Back and Next buttons, a "what you should see" checkpoint per part, the Part E test table, and for each part the Lab 3 code before and the Lab 9 starter code after with changed lines marked. Download buttons for the starter, the handout (PDF and Word) and the Lab 9 requirements.
 
 ## Reference notes and the Sources block (v4)
 
@@ -86,22 +86,14 @@ Generated set (12 learners, 75 probes, seed 360): policy recall 0.89 vs naive 0.
 
 Reproduce with `python -m data360.evaluate` and `python -m data360.evaluate --dataset generated`.
 
-## Student lab
+## Student lab (Lab 9)
 
-See `lab/LAB.md`. Students fill in six functions in `lab/starter/memory_lab.py` (write filter, write and correct, point in time, retrieve with filter first, prompt, delete) plus two stretch exercises (forgetting, consolidation).
+The lab we run in class is **Lab 9: Chatbot with Long-Term Memory**. Students take their Lab 3 chatbot (streaming, 2-exchange buffer, system prompt first) and add a persistent ChromaDB store like the one from Lab 4, so the bot remembers each user across sessions and never mixes users up. Part A (setup) is already written; students fill in four short functions in Parts B to D, test with the 5-row table in Part E, and submit on Blackboard with two reflection questions. 40 minutes plus a 5 minute walkthrough.
 
-```bash
-python lab/check.py              # check your starter file
-python lab/check.py ex4          # one exercise
-python lab/check.py --solutions  # reference solutions: 16/16
-```
-
-* `lab/solutions/memory_lab.py`: reference solutions (regenerate the starter with `python scripts/make_starter.py`).
-* `lab/checks/`: 16 checkpoint tests, including an unseen learner so hard-coded ids fail.
-* `lab/INSTRUCTOR_GUIDE.md`: preflight, timing table, expected outputs, common errors and hints, grading suggestion.
-* `lab/EXAM_QUESTIONS.md`: five interactive questions with hidden answers.
-
-The lab keeps the structure of our earlier Data360 Streamlit lab (`lab.md` from the first Data360-Memory app): 40 minutes plus a 5 minute walkthrough, timed steps each ending in an observable **Checkpoint**, "If you get stuck" and "Stop here" sections. What is new: students now write the memory loop themselves in starter code with automatic checks, instead of only clicking through the app.
+* Open the **Lab 9: Memory Lab** page to walk through it by clicking. Each part shows the Lab 3 code before and the Lab 9 code after, with changed lines marked.
+* `lab9/`: the handout (`HANDOUT.md`, the same text as `Lab9_handout.pdf` and `.docx`), `Lab9_starter.py`, our `Lab3.py` (the "before" code) and `requirements_lab9.txt`.
+* The reference solution is **not** in this repository, because the app is public. The team keeps it and shares it after the due date.
+* The earlier Data360 memory lab (`lab/` in versions 1 to 4) is retired; it is still in the Git history.
 
 ## Data
 
@@ -175,13 +167,13 @@ No `secrets.toml` is needed locally; the app runs without one. Never commit keys
 
 ```
 app.py                     Streamlit entry point (navigation)
-pages/                     Overview, Data Explorer, Chat and Memory, Memory Timeline, Evaluation, Lab
+pages/                     Overview, Data Explorer, Chat and Memory, Memory Timeline, Evaluation, Lab 9: Memory Lab
 data360/                   memory system: store, memory, embeddings, knowledge, sources, extract, prompting, answer, synthetic, evaluate
 data/real/                 cached real data + manifest.json
 data/synthetic/            course set + generated learners and probes
-lab/                       LAB.md, starter/, solutions/, checks/, check.py, INSTRUCTOR_GUIDE.md, EXAM_QUESTIONS.md
+lab9/                      HANDOUT.md, Lab9_handout.pdf/.docx, Lab9_starter.py, Lab3.py, requirements_lab9.txt
 scripts/                   fetch_real_data.py, verify_reference_notes.py, make_starter.py
-tests/                     pytest: data, memory operations, evaluation, lab, Streamlit pages
+tests/                     pytest: data, memory operations, evaluation, reference notes, Lab 9 page, Streamlit pages
 DATA_SOURCES.md            sources and licences
 docs/screenshots/          what each page looks like
 ```

@@ -12,7 +12,7 @@ nav = st.navigation([
     st.Page("pages/2_Chat_and_Memory.py", title="Chat and Memory", icon="💬"),
     st.Page("pages/3_Memory_Timeline.py", title="Memory Timeline", icon="🕒"),
     st.Page("pages/4_Evaluation.py", title="Evaluation", icon="📊"),
-    st.Page("pages/5_Lab.py", title="Lab", icon="🧪"),
+    st.Page("pages/5_Lab.py", title="Lab 9: Memory Lab", icon="🧪"),
 ])
 # Run whichever page the user selected. Every page draws the shared sidebar, including the model
 # switch.
