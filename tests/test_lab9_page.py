@@ -1,6 +1,6 @@
 """Tests for the Lab 9: Memory Lab page and the lab9/ files it shows."""
 # I check that the page loads, that every step from the handout can be reached by clicking, that each
-# part shows its Lab 3 to Lab 9 changes, and that no solution code is exposed on the public app.
+# part shows its Lab 3 to Lab 9 changes, and that the solution and live demo link are offered.
 import re
 from pathlib import Path
 
@@ -32,11 +32,12 @@ def _text(at):
     return "\n".join(parts)
 
 
-# The student files the page needs are in the repo; the solution is not.
-def test_lab9_files_present_and_no_solution():
-    for f in ["HANDOUT.md", "Lab9_starter.py", "Lab3.py", "Lab9_handout.pdf", "Lab9_handout.docx", "requirements_lab9.txt"]:
+# The student files, the solution and the test guide are all in the repo.
+def test_lab9_files_present():
+    for f in ["HANDOUT.md", "Lab9_starter.py", "Lab3.py", "Lab9_handout.pdf", "Lab9_handout.docx", "requirements_lab9.txt",
+              "Lab9_solution.py", "LAB9_TEST_GUIDE.md"]:
         assert (ROOT / "lab9" / f).exists(), f
-    assert not list(ROOT.rglob("Lab9_solution*"))
+    assert lab9.LIVE_APP_URL in lab9.TEST_GUIDE.read_text(encoding="utf-8")
     assert not (ROOT / "lab").exists(), "the old Data360 lab is retired"
 
 
@@ -111,3 +112,19 @@ def test_click_through_all_steps():
 # The navigation title in the entry point is the one Edouard asked for.
 def test_navigation_title():
     assert 'title="Lab 9: Memory Lab"' in (ROOT / "app.py").read_text(encoding="utf-8")
+
+
+# The page links the live Lab 9 app and offers the solution and the test guide for download.
+def test_live_link_and_solution_downloads():
+    at = _page()
+    src = (ROOT / "pages/5_Lab.py").read_text(encoding="utf-8")
+    assert "lab9.LIVE_APP_URL" in src and "st.link_button" in src
+    assert "Download Lab9_solution.py" in src and "Download the live test guide" in src
+    assert "def should_remember" in "\n".join(c.value for c in at.code)
+
+
+# The working solution has all four TODO parts filled in.
+def test_solution_complete():
+    sol = lab9.SOLUTION.read_text(encoding="utf-8")
+    assert "collection.upsert(" in sol and 'where = {"user_id": user_id}' in sol
+    assert "# <- replace this line" not in sol

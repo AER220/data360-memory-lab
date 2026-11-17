@@ -16,7 +16,12 @@ title, subtitle = lab9.handout_title()
 st.title("Lab 9: Memory Lab")
 st.caption(f"{title} | {subtitle}. Same text as the handout on Blackboard.")
 
-# Downloads: only student files. The reference solution is not part of this public app on purpose.
+# Live demo: our finished Lab 9 running on Streamlit, so students can open it and test long-term memory.
+st.info("See the finished Lab 9 working: open the live app, type your name in the sidebar, tell it a fact "
+        "about yourself, refresh the page and ask **What do you remember about me?**")
+st.link_button("Open the live Lab 9 app", lab9.LIVE_APP_URL, type="primary", width="stretch")
+
+# Downloads: the student files, plus the working solution and the test guide.
 d1, d2, d3, d4 = st.columns(4)
 d1.download_button("Download Lab9_starter.py", lab9.STARTER.read_bytes(), file_name="Lab9_starter.py",
                    mime="text/x-python", type="primary", width="stretch")
@@ -27,6 +32,11 @@ d3.download_button("Download the handout (Word)", (lab9.LAB9 / "Lab9_handout.doc
                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", width="stretch")
 d4.download_button("Download requirements for Lab 9", lab9.REQUIREMENTS.read_bytes(), file_name="requirements.txt",
                    mime="text/plain", width="stretch")
+d5, d6, _, _ = st.columns(4)
+d5.download_button("Download Lab9_solution.py", lab9.SOLUTION.read_bytes(), file_name="Lab9_solution.py",
+                   mime="text/x-python", width="stretch")
+d6.download_button("Download the live test guide", lab9.TEST_GUIDE.read_bytes(), file_name="LAB9_TEST_GUIDE.md",
+                   mime="text/markdown", width="stretch")
 
 # ---------- the stepper ----------
 # The current step lives in my own session key ("lab_step"), so it survives reruns and page changes.
@@ -121,11 +131,15 @@ with st.expander("Whole file: Lab 3 to Lab 9 starter, all changes"):
     st.code("\n".join(full), language="diff")
 with st.expander("Whole file: Lab9_starter.py"):
     st.code(lab9.STARTER.read_text(encoding="utf-8"), language="python")
+with st.expander("Whole file: Lab9_solution.py (the working version in the live app)"):
+    st.code(lab9.SOLUTION.read_text(encoding="utf-8"), language="python")
+with st.expander("How to test long-term memory on the live app"):
+    st.markdown(lab9.TEST_GUIDE.read_text(encoding="utf-8"))
 
-# For the presenting team: the 5 minute walkthrough from our instructor notes (no solution code).
+# For the presenting team: the 5 minute walkthrough from our instructor notes.
 with st.expander("For the presenting team: 5 minute walkthrough before students start"):
     st.markdown("""
-Run the solution on the projector (memory on). The solution file is kept by the team, not in this app.
+Open the live Lab 9 app on the projector (memory on): https://aer220-ist688-lab.streamlit.app/
 
 1. **0:00** Type `ed` as the name. Say "I prefer short answers". Point to the "Saved to long-term memory" line and the count going to 1. Say "ok thanks": not saved. *That is the write filter, Part B.*
 2. **0:01** Click **Start new chat**. The conversation is gone: that is the Lab 3 buffer. Ask "What is a volcano?" The answer is short.

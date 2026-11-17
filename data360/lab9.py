@@ -1,7 +1,7 @@
 """Lab 9 content for the Lab page: the handout split into steps, and the Lab 3 to Lab 9 changes.
 
-Everything is read from the files in lab9/ (HANDOUT.md, Lab3.py, Lab9_starter.py), so the page
-always shows exactly what students get. The reference solution is deliberately not in the app.
+Everything is read from the files in lab9/ (HANDOUT.md, Lab3.py, Lab9_starter.py, Lab9_solution.py), so the
+page always shows exactly what students get. The working solution runs live at LIVE_APP_URL.
 """
 # I keep the Lab page logic here, not in the page file, so tests can check it without Streamlit.
 from __future__ import annotations
@@ -18,6 +18,10 @@ LAB3 = LAB9 / "Lab3.py"
 HANDOUT_MD = LAB9 / "HANDOUT.md"
 HANDOUT_PDF = LAB9 / "Lab9_handout.pdf"
 REQUIREMENTS = LAB9 / "requirements_lab9.txt"
+SOLUTION = LAB9 / "Lab9_solution.py"
+TEST_GUIDE = LAB9 / "LAB9_TEST_GUIDE.md"
+# Our own Lab app with the finished Lab 9 running, used for the live demo in class.
+LIVE_APP_URL = "https://aer220-ist688-lab.streamlit.app/"
 
 # The steps of the walkthrough, in class order: (key, button label, handout heading prefix, minutes).
 STEPS = [
